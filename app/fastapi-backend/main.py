@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 import io
 import re
 from PIL import Image
-from fastapi import Cookie, FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Response
+from fastapi import BackgroundTasks, Cookie, FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
@@ -20,6 +20,7 @@ from bson import ObjectId
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
+from tqdm import tqdm
 from ultralytics import YOLO
 import faiss
 from deepface.DeepFace import represent
@@ -48,6 +49,11 @@ async def lifespan(app: FastAPI):
             "event_id": CURRENT_EVENT_ID
         })
     faiss_index = load_faiss_index(CURRENT_EVENT_ID, dimension)
+    settings_coll.update_one(
+        {"_id": "current_event"},
+        {"$set": {"status": "free"}},
+        upsert=True
+    )
     yield
 
 
@@ -73,7 +79,6 @@ settings_coll = db["settings"]
 
 #CDN Info
 CDN_BASE_URL = "https://your-cdn.com/"
-CDN_UPLOAD_URL = "https://your-cdn.com/upload"
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -99,7 +104,7 @@ dimension = 4096
 model = YOLO("model.pt")
 FAISS_INDEX_DIR = "./faiss_indices"
 os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
-SIMILARITY_THRESHOLD=0.25
+SIMILARITY_THRESHOLD=0.5
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -238,7 +243,7 @@ def list_event_files(event_id: str):
 
 
 def localize_faces_func(image):
-    results = model.predict(source=image, conf=0.25)
+    results = model.predict(source=image, conf=0.25,verbose=False)
     face_boxes = []
     for box in results[0].boxes.xyxy:
         x1, y1, x2, y2 = map(int, box)
@@ -276,19 +281,10 @@ def allocate_int_id_for(uid):
 
     return new_seq
 
-def get_object_id_from_int(int_id) -> ObjectId:
-    mapping = user_id_map.find_one(
-        {"int_id": int_id},
-        {"_id": 1}
-    )
-    if not mapping:
-        raise KeyError(f"No ObjectId found for int_id={int_id}")
-    return mapping["_id"]
     
-def process_image(file, event_id, similarity_threshold):
+def process_image(file, feature_records, int_id_map, event_id, similarity_threshold):
     try:
         image = file["image"]
-        print(file["file_key"])
         if image is None:
             print(f"Failed to read image: {file}")
             return None
@@ -296,39 +292,32 @@ def process_image(file, event_id, similarity_threshold):
         bounding_boxes = localize_faces_func(image)
         image_matches = {}
 
-        # Get feature vectors only for the given event_id
-        all_records = list(feature_vector_collection.find({"event_id": event_id}))
-
-        # If no feature vectors are found for the event, return empty matches
-        if not all_records:
-            return image_matches
-
         for box in bounding_boxes:
             x1, y1, x2, y2 = box
             face_image = image[y1:y2, x1:x2]
-            feature_vector=extract_features_func(face_image)
+            feature_vector = extract_features_func(face_image)
             query_vector = np.array(feature_vector)
             normalized_query = normalize_vectors(query_vector.reshape(1, -1))
-            k = 1 
+
+            k = 1
             similarities, indices = faiss_index.search(normalized_query, k)
             best_score = float(similarities[0, 0])
             best_int_id = int(indices[0, 0])
-            best_obj_id = get_object_id_from_int(best_int_id)
-            # Process results
+
+            try:
+                best_obj_id = int_id_map[best_int_id]
+            except KeyError:
+                print(f"No mapping for int_id {best_int_id}")
+                continue
+
             if best_score >= similarity_threshold:
-                    person_id = str(best_obj_id)
-                    if person_id not in image_matches:
-                        image_matches[person_id] = []
-                    # print({
-                    #     "file_key": file["file_key"],
-                    #     "bounding_box": box,
-                    #     "similarity": float(best_score)
-                    # })
-                    image_matches[person_id].append({
-                        "file_key": file["file_key"],
-                        "bounding_box": box,
-                        "similarity": float(best_score)
-                    })
+                person_id = str(best_obj_id)
+                image_matches.setdefault(person_id, []).append({
+                    "file_key": file["file_key"],
+                    "bounding_box": box,
+                    "similarity": float(best_score)
+                })
+
         return image_matches
     except Exception as e:
         print(f"Error processing image : {e}")
@@ -336,7 +325,7 @@ def process_image(file, event_id, similarity_threshold):
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=60))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -486,31 +475,53 @@ async def process_user_images(
 
 @app.post("/admin/match_faces")
 async def match_faces(
+    background_tasks: BackgroundTasks,
     admin_user: UserOut = Depends(get_current_admin)
 ):
-    """Match faces from stored images for a specific event from CDN."""
-    try:
-        # Construct CDN directory URL
-        event_directory_url = f"{CDN_BASE_URL}{CURRENT_EVENT_ID}/"
+    """Initiate face matching in the background and return immediately."""
+    # Step 1: Check current status
+    current_settings = settings_coll.find_one({"_id": "current_event"})
+    current_status = current_settings.get("status") if current_settings else "free"
 
-        # Fetch image file list from CDN (Assuming a JSON API returns file names)
-        # response = requests.get(event_directory_url)
-        # if response.status_code != 200:
-        #     raise HTTPException(status_code=400, detail="Event images directory not found on CDN")
-        
-        # image_files = response.json().get("images", [])  # Assuming CDN API returns {"images": ["image1.jpg", "image2.png"]}
+    if current_status == "processing":
+        raise HTTPException(status_code=409, detail="Matching is already in progress.")
+
+    # Step 2: Set status to 'processing'
+    settings_coll.update_one(
+        {"_id": "current_event"},
+        {"$set": {"status": "processing"}},
+        upsert=True
+    )
+
+    # Step 3: Launch background task
+    background_tasks.add_task(run_face_matching)
+
+    # Step 4: Immediate response
+    return {
+        "message": "Face matching has started in the background.",
+        "status": "processing"
+    }
+
+
+def run_face_matching():
+    try:
         image_files = list_event_files(CURRENT_EVENT_ID)
         matches = {}
 
-        print("Image files:", image_files["files"])  # Debugging: Ensure files are listed
+        all_records = list(feature_vector_collection.find({"event_id": CURRENT_EVENT_ID}))
+        if not all_records:
+            print("No feature vectors found.")
+            return
 
-        for file_name in image_files["files"]:
+        id_map_list = list(user_id_map.find({}, {"int_id": 1, "_id": 1}))
+        int_id_to_obj = {record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record}
+        for file_name in tqdm(image_files["files"], desc="Matching Faces"):
             try:
                 image_path = f"{CURRENT_EVENT_ID}/{file_name}"
                 image = fetch_image_from_cdn(image_path)
 
                 file = {"image": image, "file_key": file_name}
-                result = process_image(file, CURRENT_EVENT_ID, SIMILARITY_THRESHOLD)
+                result = process_image(file, all_records, int_id_to_obj, CURRENT_EVENT_ID, SIMILARITY_THRESHOLD)
                 
                 if result:
                     for person_id, file_matches in result.items():
@@ -521,21 +532,27 @@ async def match_faces(
                             fk = match['file_key']
                             if fk not in matches[person_id]:
                                 matches[person_id].append(fk)
-            
+
             except Exception as e:
                 print(f"Error processing {file_name}: {e}")
-                
 
         matches_json = {"matches": matches}
         matches_json_url = upload_to_cdn(f"{CURRENT_EVENT_ID}/matches.json", matches_json)
 
-        return {
-            "message": "Face matching completed successfully",
-            "matches_file_url": matches_json_url
-        }
+        # Update to free after completion
+        settings_coll.update_one(
+            {"_id": "current_event"},
+            {"$set": {"status": "free"}},
+            upsert=True
+        )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        settings_coll.update_one(
+            {"_id": "current_event"},
+            {"$set": {"status": "error", "error_detail": str(e)}},
+            upsert=True
+        )
+        print(f"Error in background task: {e}")
     
 @app.post("/auth/register")
 def register_user(user: RegisterUser):
@@ -656,6 +673,9 @@ async def create_event(admin: UserOut = Depends(get_current_admin)):
     users_collection.delete_many({})
     feature_vector_collection.delete_many({})
     user_id_map.delete_many({})
+
+    event_folder_path = os.path.join(CDN_STORAGE_PATH, new_id)
+    os.makedirs(event_folder_path, exist_ok=True) 
     
     return {"event_id": new_id}
 

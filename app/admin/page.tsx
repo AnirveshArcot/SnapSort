@@ -7,7 +7,7 @@ import { UserNav } from "@/components/user-nav";
 import { Button } from "@/components/ui/button";
 import { getSession, uploadEventImages } from "@/lib/api";
 import { createNewEvent, matchFaces, generateFeatures } from "@/lib/api";
-
+import imageCompression from 'browser-image-compression';
 
 interface User {
   id: string;
@@ -24,7 +24,8 @@ export default function AdminPage() {
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   useEffect(() => {
     (async () => {
       const sessionUser = await getSession();
@@ -64,19 +65,58 @@ export default function AdminPage() {
       reader.onerror = reject;
     });
 
-    const handleUpload = async () => {
+    const compressImage = async (file: File) => {
+      const options = {
+        maxSizeMB: 1,               // Max size in MB
+        maxWidthOrHeight: 1024,     // Resize large images
+        useWebWorker: true,
+      };
+    
       try {
-        const base64Images = await Promise.all(
-          selectedFiles.map((file) => convertToBase64(file))
-        );
-  
-        const { uploaded } = await uploadEventImages(base64Images);
-        console.log(`Images uploaded successfully! (${uploaded.length} files)`);
+        const compressedFile = await imageCompression(file, options);
+        return compressedFile;
+      } catch (error) {
+        console.error('Compression failed:', error);
+        return file; // fallback to original
+      }
+    };
+
+    const handleUpload = async () => {
+      setUploading(true);
+      setUploadProgress(0);
+    
+      try {
+        const BATCH_SIZE = 5;
+        const totalBatches = Math.ceil(selectedFiles.length / BATCH_SIZE);
+    
+        for (let i = 0; i < selectedFiles.length; i += BATCH_SIZE) {
+          const batch = selectedFiles.slice(i, i + BATCH_SIZE);
+          
+          const compressedFiles = await Promise.all(
+            batch.map((file) => compressImage(file))
+          );
+          
+          const base64Images = await Promise.all(
+            compressedFiles.map((file) => convertToBase64(file))
+          );
+          
+          const { uploaded } = await uploadEventImages(base64Images);
+          console.log(`Batch uploaded (${uploaded.length} files)`);
+    
+          // Update progress
+          const currentBatch = Math.floor(i / BATCH_SIZE) + 1;
+          setUploadProgress(Math.round((currentBatch / totalBatches) * 100));
+        }
+    
+        alert("All images uploaded successfully!");
         setSelectedFiles([]);
       } catch (err: any) {
         console.error(err);
         alert(`Upload failed: ${err.message || err}`);
       }
+    
+      setUploading(false);
+      setUploadProgress(0);
     };
 
   const handleCreateEvent = async () => {
@@ -145,9 +185,20 @@ export default function AdminPage() {
             onChange={handleFileChange}
             className="block"
           />
-          <Button onClick={handleUpload} disabled={!selectedFiles.length}>
-            Upload Selected Images
+          <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
+            {uploading ? "Uploading…" : "Upload Selected Images"}
           </Button>
+          {uploading && (
+          <div className="mt-2 w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+            <div
+              className="h-4 bg-blue-500 transition-all duration-300 ease-out"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+          )}
+            <p className="text-sm mt-1 text-muted-foreground">
+              {uploading ? `Uploading... ${uploadProgress}%` : ""}
+            </p>
         </div>
 
         {/* Action Buttons */}
