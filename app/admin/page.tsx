@@ -5,8 +5,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserNav } from "@/components/user-nav";
 import { Button } from "@/components/ui/button";
-import { getSession, uploadEventImages } from "@/lib/api";
-import { createNewEvent, matchFaces, generateFeatures } from "@/lib/api";
+import { downloadImageBlob, getSession, getPreviwes, uploadEventImages } from "@/lib/api";
+import { createNewEvent, matchFaces } from "@/lib/api";
 import imageCompression from 'browser-image-compression';
 
 interface User {
@@ -25,35 +25,34 @@ export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [imageList, setImageList] = useState<{ name: string; base64: string }[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
-  useEffect(() => {
-    (async () => {
-      const sessionUser = await getSession();
 
-      if (sessionUser) {
-        if (sessionUser.role !== "admin") {
-          router.push("/");
-          return;
-        }
-        setUser(sessionUser);
-        setChecking(false);
-      } else {
-        router.push("/login");
-      }
-    })();
-  }, [router]);
+  const handleDownload = async (filename: string) => {
+    try {
+      const blob = await downloadImageBlob(filename);
+      const url = window.URL.createObjectURL(blob);
+  
+      const a = document.createElement("a");
+      a.href = url;
+      const modifiedName = filename.replace("_preview", "");
+      a.download = modifiedName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed:", err);
+      alert("Failed to download image.");
+    }
+  };
 
-  if (checking) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p>Checking authentication…</p>
-      </div>
-    );
-  }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setSelectedFiles(Array.from(e.target.files));
+  const fetchImages = async () => {
+    try {
+      const images = await getPreviwes();
+      setImageList(images);
+    } catch (err) {
+      console.error("Failed to fetch images:", err);
     }
   };
 
@@ -77,44 +76,46 @@ export default function AdminPage() {
         return compressedFile;
       } catch (error) {
         console.error('Compression failed:', error);
-        return file; // fallback to original
+        return file;
       }
     };
 
     const handleUpload = async () => {
       setUploading(true);
       setUploadProgress(0);
-    
+
       try {
         const BATCH_SIZE = 5;
         const totalBatches = Math.ceil(selectedFiles.length / BATCH_SIZE);
-    
+
         for (let i = 0; i < selectedFiles.length; i += BATCH_SIZE) {
           const batch = selectedFiles.slice(i, i + BATCH_SIZE);
-          
-          const compressedFiles = await Promise.all(
-            batch.map((file) => compressImage(file))
+
+          const compressedFiles = await Promise.all(batch.map(file => compressImage(file)));
+
+          const base64Payload = await Promise.all(
+            compressedFiles.map(async (file, idx) => {
+              const base64 = await convertToBase64(file);
+              return {
+                filename: batch[idx].name, // original name
+                base64,
+              };
+            })
           );
-          
-          const base64Images = await Promise.all(
-            compressedFiles.map((file) => convertToBase64(file))
-          );
-          
-          const { uploaded } = await uploadEventImages(base64Images);
+
+          const { uploaded } = await uploadEventImages(base64Payload);
           console.log(`Batch uploaded (${uploaded.length} files)`);
-    
-          // Update progress
-          const currentBatch = Math.floor(i / BATCH_SIZE) + 1;
-          setUploadProgress(Math.round((currentBatch / totalBatches) * 100));
+
+          setUploadProgress(Math.round(((i + BATCH_SIZE) / selectedFiles.length) * 100));
         }
-    
+
         alert("All images uploaded successfully!");
         setSelectedFiles([]);
       } catch (err: any) {
         console.error(err);
         alert(`Upload failed: ${err.message || err}`);
       }
-    
+
       setUploading(false);
       setUploadProgress(0);
     };
@@ -139,12 +140,37 @@ export default function AdminPage() {
     }
   };
 
-  const handleGenerateFeatures = async () => {
-    try {
-      const data = await generateFeatures();
-      console.log(`Feature vectors generated for images.`);
-    } catch (err: any) {
-      console.error(err);
+
+  useEffect(() => {
+    (async () => {
+      const sessionUser = await getSession();
+
+      if (sessionUser) {
+        if (sessionUser.role !== "admin") {
+          router.push("/");
+          return;
+        }
+        setUser(sessionUser);
+        
+        setChecking(false);
+        await fetchImages();
+      } else {
+        router.push("/login");
+      }
+    })();
+  }, [router]);
+
+  if (checking) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p>Checking authentication…</p>
+      </div>
+    );
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setSelectedFiles(Array.from(e.target.files));
     }
   };
 
@@ -207,9 +233,33 @@ export default function AdminPage() {
           <Button onClick={handleMatchFaces} className="ml-4">
             Match Faces
           </Button>
-          <Button onClick={handleGenerateFeatures} className="ml-4">
-            Generate Features
-          </Button>
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold">Uploaded Images</h3>
+          {imageList.length ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {imageList.map((img) => (
+                <div
+                  key={img.name}
+                  className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
+                >
+                  <img
+                    src={img.base64}
+                    alt={img.name}
+                    className="w-full h-48 object-cover"
+                  />
+                  <div className="p-2 flex justify-between items-center text-sm">
+                    <span className="truncate" title={img.name}>{img.name}</span>
+                    <Button onClick={() => handleDownload(img.name)}>
+                      Download
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
+          )}
         </div>
       </div>
     </div>

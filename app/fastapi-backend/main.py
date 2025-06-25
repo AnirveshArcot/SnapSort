@@ -1,12 +1,9 @@
 import base64
-from contextlib import asynccontextmanager
-import io
 import re
-from PIL import Image
-from fastapi import BackgroundTasks, Cookie, FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request, Response
+from fastapi import BackgroundTasks, Cookie, FastAPI, Depends, HTTPException, Query, status, File, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import uuid
@@ -25,7 +22,6 @@ from ultralytics import YOLO
 import faiss
 from deepface.DeepFace import represent
 import numpy as np
-import requests
 import cv2
 import json
 
@@ -75,6 +71,7 @@ users_collection = db["users"]
 feature_vector_collection = db["image_feature_vectors"]
 user_id_map = db["counters_collection"]
 settings_coll = db["settings"]
+employees_collection = db["employees"]
 
 
 #CDN Info
@@ -146,8 +143,12 @@ class RegisterUser(BaseModel):
     password: str
     image: str
 
+class Base64Image(BaseModel):
+    filename: str
+    base64: str
+
 class UploadImagesRequest(BaseModel):
-    images: List[str]
+    images: List[Base64Image]
 
 class UploadImagesResponse(BaseModel):
     uploaded: List[str]
@@ -228,7 +229,6 @@ def upload_to_cdn(file_name, json_data):
     return {"url": f"local://{file_path}"}  # Simulated URL
 
 def list_event_files(event_id: str):
-    """Lists only image files in the given event's folder inside the local CDN storage."""
     event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
     if not os.path.exists(event_folder) or not os.path.isdir(event_folder):
         raise HTTPException(status_code=400, detail=f"Event folder not found: {event_id}")
@@ -285,40 +285,37 @@ def allocate_int_id_for(uid):
 def process_image(file, feature_records, int_id_map, event_id, similarity_threshold):
     try:
         image = file["image"]
-        if image is None:
-            print(f"Failed to read image: {file}")
-            return None
-
+        file_key = file["file_key"]
         bounding_boxes = localize_faces_func(image)
-        image_matches = {}
+        if not bounding_boxes:
+            return {}
 
-        for box in bounding_boxes:
-            x1, y1, x2, y2 = box
-            face_image = image[y1:y2, x1:x2]
-            feature_vector = extract_features_func(face_image)
-            query_vector = np.array(feature_vector)
-            normalized_query = normalize_vectors(query_vector.reshape(1, -1))
-
-            k = 1
-            similarities, indices = faiss_index.search(normalized_query, k)
-            best_score = float(similarities[0, 0])
-            best_int_id = int(indices[0, 0])
-
-            try:
-                best_obj_id = int_id_map[best_int_id]
-            except KeyError:
-                print(f"No mapping for int_id {best_int_id}")
-                continue
+        vecs = []
+        for (x1, y1, x2, y2) in bounding_boxes:
+            face_img = image[y1:y2, x1:x2]
+            feat = extract_features_func(face_img)
+            vecs.append(np.array(feat, dtype='float32'))
+        batch = np.stack(vecs, axis=0)
+        faiss.normalize_L2(batch)
+        similarities, indices = faiss_index.search(batch, 1)
+        matches = {}
+        for i, box in enumerate(bounding_boxes):
+            best_score = float(similarities[i, 0])
+            best_int_id = int(indices[i, 0])
 
             if best_score >= similarity_threshold:
-                person_id = str(best_obj_id)
-                image_matches.setdefault(person_id, []).append({
-                    "file_key": file["file_key"],
-                    "bounding_box": box,
-                    "similarity": float(best_score)
-                })
+                try:
+                    obj_id = int_id_map[best_int_id]
+                except KeyError:
+                    continue
 
-        return image_matches
+                pid = str(obj_id)
+                matches.setdefault(pid, []).append({
+                    "file_key": file_key,
+                    "bounding_box": box,
+                    "similarity": best_score
+                })       
+        return matches
     except Exception as e:
         print(f"Error processing image : {e}")
         return None
@@ -350,7 +347,6 @@ async def get_current_user(
     except jwt.PyJWTError:
         raise credentials_exception
 
-    # Admin user logic
     if role == "admin" and user_id == "admin":
         return User(
             id="NEO",
@@ -392,86 +388,6 @@ async def get_current_admin(current_user: UserOut = Depends(get_current_user)) -
 
 # Routes
 
-@app.post("/admin/process_user_images")
-async def process_user_images(
-    admin_user: UserOut = Depends(get_current_admin)
-):
-    global faiss_index
-    stored_data = []
-    try:
-
-        user_records = list(
-            users_collection.find(
-                {},
-                {"_id": 1, "image": 1}
-            )
-        )
-        if not user_records:
-            raise HTTPException(status_code=400, detail="No users found in collection")
-
-        user_ids = [user["_id"] for user in user_records]
-        existing = list(
-            feature_vector_collection.find(
-                {"_id": {"$in": user_ids}},
-                {"_id": 1}
-            )
-        )
-        existing_ids = {rec["_id"] for rec in existing}
-
-        new_vectors = []
-        new_ids = []
-        for user in user_records:
-            uid = user["_id"]
-            if uid in existing_ids:
-                continue
-
-            img = decode_base64_image(user["image"])
-            if img is None:
-                raise ValueError(f"Invalid image data for user ID {uid}")
-
-
-            box = localize_faces_func(img)
-            x, y, w, h = box[0]
-            face_img = img[y:y+h, x:x+w]
-
-
-            vec = extract_features_func(face_img)
-
-            new_vectors.append(vec)
-            int_id = allocate_int_id_for(uid)
-            new_ids.append(int_id)
-
-            record = {
-                "_id": uid,
-                "feature_vector": np.array(vec).tolist(),
-                "event_id": CURRENT_EVENT_ID
-            }
-
-            feature_vector_collection.update_one(
-                {"_id": uid},
-                {"$set": record},
-                upsert=True
-            )
-            stored_data.append({"_id": str(uid), "event_id": CURRENT_EVENT_ID})
-
-
-        if new_vectors:
-            if faiss_index is None:
-                faiss_index = load_faiss_index(CURRENT_EVENT_ID, dimension)
-            arr = np.vstack(new_vectors).astype('float32')
-            ids = np.array(new_ids, dtype='int64')
-
-            normed = normalize_vectors(arr)
-            faiss_index.add_with_ids(normed, ids)
-            save_faiss_index(CURRENT_EVENT_ID)
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing user images: {e}")
-
-    return {"message": "User images processed for all users successfully", "stored_data": stored_data}
-
-
-
 
 @app.post("/admin/match_faces")
 async def match_faces(
@@ -479,24 +395,16 @@ async def match_faces(
     admin_user: UserOut = Depends(get_current_admin)
 ):
     """Initiate face matching in the background and return immediately."""
-    # Step 1: Check current status
     current_settings = settings_coll.find_one({"_id": "current_event"})
     current_status = current_settings.get("status") if current_settings else "free"
-
     if current_status == "processing":
         raise HTTPException(status_code=409, detail="Matching is already in progress.")
-
-    # Step 2: Set status to 'processing'
     settings_coll.update_one(
         {"_id": "current_event"},
         {"$set": {"status": "processing"}},
         upsert=True
     )
-
-    # Step 3: Launch background task
     background_tasks.add_task(run_face_matching)
-
-    # Step 4: Immediate response
     return {
         "message": "Face matching has started in the background.",
         "status": "processing"
@@ -506,16 +414,29 @@ async def match_faces(
 def run_face_matching():
     try:
         image_files = list_event_files(CURRENT_EVENT_ID)
+        compressed_files = [
+            file_name for file_name in image_files["files"]
+            if os.path.splitext(file_name)[0].endswith("_compressed")
+        ]
+    
         matches = {}
 
         all_records = list(feature_vector_collection.find({"event_id": CURRENT_EVENT_ID}))
         if not all_records:
             print("No feature vectors found.")
+            settings_coll.update_one(
+            {"_id": "current_event"},
+            {"$set": {"status": "error", "error_detail": str(e)}},
+            upsert=True
+        )
             return
-
         id_map_list = list(user_id_map.find({}, {"int_id": 1, "_id": 1}))
         int_id_to_obj = {record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record}
-        for file_name in tqdm(image_files["files"], desc="Matching Faces"):
+        for file_name in tqdm(compressed_files, desc="Matching Faces"):
+            base, ext = os.path.splitext(file_name)
+            if not base.endswith("_compressed"):
+                continue
+
             try:
                 image_path = f"{CURRENT_EVENT_ID}/{file_name}"
                 image = fetch_image_from_cdn(image_path)
@@ -538,8 +459,6 @@ def run_face_matching():
 
         matches_json = {"matches": matches}
         matches_json_url = upload_to_cdn(f"{CURRENT_EVENT_ID}/matches.json", matches_json)
-
-        # Update to free after completion
         settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "free"}},
@@ -556,27 +475,69 @@ def run_face_matching():
     
 @app.post("/auth/register")
 def register_user(user: RegisterUser):
+    global faiss_index
     if users_collection.find_one({"email": user.email}):
         raise HTTPException(status_code=400, detail="Email already registered.")
+
     hashed_password = bcrypt.hashpw(user.password.encode('utf-8'), bcrypt.gensalt())
-    user_id = str(uuid4())
+
+    try:
+        img = decode_base64_image(user.image)
+        if img is None:
+            raise ValueError("Invalid image data")
+
+        box = localize_faces_func(img)
+        if not box:
+            raise ValueError("No face detected in the image")
+        x, y, w, h = box[0]
+        face_img = img[y:y+h, x:x+w]
+
+        vec = extract_features_func(face_img)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process image: {e}")
+
+    # Insert user and get MongoDB's _id
     user_data = {
-        "id": user_id,
         "name": user.name,
         "email": user.email,
         "password": hashed_password.decode('utf-8'),
         "image": user.image,
-        "joined_event":CURRENT_EVENT_ID,
-        "role":"role",
+        "joined_event": CURRENT_EVENT_ID,
+        "role": "user"
     }
+
     result = users_collection.insert_one(user_data)
+    mongo_id = result.inserted_id  
+
+    int_id = allocate_int_id_for(str(mongo_id))
+
+    feature_record = {
+        "_id": mongo_id,
+        "feature_vector": np.array(vec).tolist(),
+        "event_id": CURRENT_EVENT_ID
+    }
+
+    feature_vector_collection.update_one(
+        {"_id": mongo_id},
+        {"$set": feature_record},
+        upsert=True
+    )
+
+    if faiss_index is None:
+        faiss_index = load_faiss_index(CURRENT_EVENT_ID, dimension)
+
+    normed = normalize_vectors(np.array([vec]).astype("float32"))
+    faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
+    save_faiss_index(CURRENT_EVENT_ID)
+
     return {
-        "id": user_id,
+        "id": str(mongo_id),
         "name": user.name,
         "email": user.email,
         "image": user.image,
-        "joined_event":CURRENT_EVENT_ID,
-        "role":"user"
+        "joined_event": CURRENT_EVENT_ID,
+        "role": "user"
     }
 
 @app.post("/auth/login")
@@ -640,6 +601,7 @@ async def get_event_images(current_user: UserOut = Depends(get_current_user)):
 
     image_dicts = []
     if current_user.id not in matches_data['matches']:
+        print(current_user.id)
         return image_dicts
     for idx, filename in enumerate(matches_data['matches'][current_user.id]):
         _, ext = os.path.splitext(filename)
@@ -657,7 +619,7 @@ async def get_event_images(current_user: UserOut = Depends(get_current_user)):
                     "id": idx,
                     "image_base64": f"data:image/{ext[1:]};base64,{encoded_string}"
                 })
-
+    print("getting to here 1")
     return image_dicts
 
 @app.post("/event/create-event")
@@ -680,44 +642,101 @@ async def create_event(admin: UserOut = Depends(get_current_admin)):
     return {"event_id": new_id}
 
 
-@app.post(
-    "/event/upload-images",
-    response_model=UploadImagesResponse,
-    status_code=201
-)
-async def upload_event_images(
-    req: UploadImagesRequest,
-    admin: UserOut = Depends(get_current_admin)
-):
+@app.post("/event/upload-images", response_model=UploadImagesResponse, status_code=201)
+async def upload_event_images(req: UploadImagesRequest, admin: UserOut = Depends(get_current_admin)):
     event_folder = os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID)
     os.makedirs(event_folder, exist_ok=True)
 
     uploaded = []
-    for b64 in req.images:
-        header, _, payload = b64.partition(",")
+
+    for img in req.images:
+        header, _, payload = img.base64.partition(",")
         try:
-            data = base64.b64decode(payload or b64)
+            image_data = base64.b64decode(payload or img.base64)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid base64 image: {e}"
+                detail=f"Invalid base64 image for file {img.filename}: {e}"
             )
 
-        file_key = f"{uuid.uuid4().hex}.jpg"
-        dest = os.path.join(event_folder, file_key)
-        with open(dest, "wb") as fout:
-            fout.write(data)
+        base_name, ext = os.path.splitext(img.filename)
+        original_filename = f"{base_name}_original{ext}"
+        original_path = os.path.join(event_folder, original_filename)
 
-        uploaded.append(file_key)
+        with open(original_path, "wb") as fout:
+            fout.write(image_data)
+        uploaded.append(original_filename)
+
+        try:
+            nparr = np.frombuffer(image_data, np.uint8)
+            img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img_np is None:
+                raise ValueError("Decoded image is None")
+            preview = cv2.resize(img_np, (0, 0), fx=0.25, fy=0.25)
+            preview_filename = f"{base_name}_preview.jpeg"
+            preview_path = os.path.join(event_folder, preview_filename)
+
+            quality = 60
+            while True:
+                success, buffer = cv2.imencode(".jpeg", preview, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                if not success:
+                    raise ValueError("Failed to encode preview image")
+                if len(buffer) <= 50 * 1024 or quality <= 30:
+                    break
+                quality -= 5
+            with open(preview_path, "wb") as fout:
+                fout.write(buffer)
+            uploaded.append(preview_filename)
+
+            compressed_filename = f"{base_name}_compressed.jpeg"
+            compressed_path = os.path.join(event_folder, compressed_filename)
+
+            quality = 80
+            while True:
+                success, buffer = cv2.imencode(".jpeg", img_np, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                if not success:
+                    raise ValueError("Failed to encode compressed image")
+                if len(buffer) <= 512 * 1024 or quality <= 40:
+                    break
+                quality -= 5
+            with open(compressed_path, "wb") as fout:
+                fout.write(buffer)
+            uploaded.append(compressed_filename)
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate preview/compressed version for {img.filename}: {e}"
+            )
+
     return UploadImagesResponse(uploaded=uploaded)
 
 
 @app.post("/auth/admin/login")
 async def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
-    if form_data.username != ADMIN_MAIL or form_data.password != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Invalid admin credentials")
+    username = form_data.username
+    password = form_data.password
 
-    access_token = create_access_token(data={"sub": "admin", "role": "admin"})
+    if username == ADMIN_MAIL and password == ADMIN_PASSWORD:
+        access_token = create_access_token(data={"sub": "admin", "role": "admin"})
+        response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
+        response.set_cookie(
+            key="auth_token",
+            value=access_token,
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/"
+        )
+        return response
+
+    user = employees_collection.find_one({"email": username})
+    if not user or not bcrypt.checkpw(password.encode(), user["password"].encode()):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    user_role = user.get("role", "user")
+    access_token = create_access_token(data={"sub": str(user["_id"]), "role": user_role})
+
     response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
     response.set_cookie(
         key="auth_token",
@@ -729,8 +748,52 @@ async def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     return response
 
+@app.get("/event/images")
+def list_event_images(admin: UserOut = Depends(get_current_admin)):
+    folder = os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID)
+    if not os.path.exists(folder):
+        return {"images": []}
+
+    images = []
+
+    for f in os.listdir(folder):
+        if (
+            f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+            and f.lower().rsplit(".", 1)[0].endswith("_preview")
+        ):
+            filepath = os.path.join(folder, f)
+            try:
+                with open(filepath, "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                    mime = "image/jpeg"
+                    if f.lower().endswith(".png"):
+                        mime = "image/png"
+                    elif f.lower().endswith(".webp"):
+                        mime = "image/webp"
+                    data_uri = f"data:{mime};base64,{encoded_string}"
+                    images.append({"name": f, "base64": data_uri})
+            except Exception as e:
+                print(f"Error reading file {f}: {e}")
+
+    return {"images": images}
 
 
+@app.get("/event/download")
+def download_image(filename: str = Query(...), admin: UserOut = Depends(get_current_admin)):
+    parts = filename.rsplit(".", 1)
+    if len(parts) != 2:
+        return JSONResponse(status_code=400, content={"detail": "Invalid filename format"})
+    original_filename = parts[0].replace("_preview", "_original") + "." + parts[1]
+    print(original_filename)
+    folder = os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID)
+    file_path = os.path.join(folder, original_filename)
+    if not os.path.exists(file_path):
+        return JSONResponse(status_code=404, content={"detail": "File not found"})
+    return FileResponse(
+        path=file_path,
+        filename=original_filename,
+        media_type="application/octet-stream"
+    )
 
 
 

@@ -12,6 +12,15 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   return data
 }
 
+async function fetchAPIMedia(endpoint: string, options: RequestInit = {}) {
+  const res = await fetch(`${API_URL}${endpoint}`, {
+    ...options,
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error('An error occurred during media')
+  return res
+}
+
 export async function registerUser(userData: Record<string, any>) {
   return fetchAPI('/auth/register', {
     method: 'POST',
@@ -66,11 +75,11 @@ export async function getEventImages(){
 }
 
 
-export async function uploadEventImages(base64Images: string[]) {
+export async function uploadEventImages(images: { filename: string, base64: string }[]) {
   return await fetchAPI("/event/upload-images", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ images: base64Images }),
+    body: JSON.stringify({ images }),
   });
 }
 
@@ -87,8 +96,14 @@ export async function matchFaces() {
   });
 }
 
-export async function generateFeatures() {
-  return await fetchAPI("/event/generate-features", {
-    method: "POST",
-  });
+
+
+export async function getPreviwes() {
+  const res = await fetchAPI("/event/previews");
+  return res.images; 
+};
+
+export async function downloadImageBlob(filename: string): Promise<Blob> {
+  const res = await fetchAPIMedia(`/event/download?filename=${encodeURIComponent(filename)}`);
+  return await res.blob(); 
 }
