@@ -1,11 +1,11 @@
 import base64
 import re
-from fastapi import BackgroundTasks, Cookie, FastAPI, Depends, HTTPException, Query, status, File, Form, Request, Response
+from fastapi import BackgroundTasks, Cookie, FastAPI, Depends, HTTPException, Query, status, File, Form, Request, Response, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Any
 import uuid
 import os
 from datetime import datetime, timedelta
@@ -24,7 +24,9 @@ from deepface.DeepFace import represent
 import numpy as np
 import cv2
 import json
-
+import uvicorn
+from secrets import token_urlsafe
+from fastapi import APIRouter
 
 
 
@@ -71,7 +73,6 @@ users_collection = db["users"]
 feature_vector_collection = db["image_feature_vectors"]
 user_id_map = db["counters_collection"]
 settings_coll = db["settings"]
-employees_collection = db["employees"]
 
 
 #CDN Info
@@ -96,17 +97,14 @@ SECRET_KEY = "your-secret-key"  # Use a secure key in production
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
 
-#FAISS and ML Settings
 dimension = 4096
-model = YOLO("model.pt")
+model = YOLO("./model.pt")
 FAISS_INDEX_DIR = "./faiss_indices"
 os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
 SIMILARITY_THRESHOLD=0.5
 
-# OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
-# Async wrapper for pymongo (since pymongo is synchronous)
 executor = ThreadPoolExecutor()
 
 async def run_in_threadpool(func, *args, **kwargs):
@@ -153,7 +151,13 @@ class UploadImagesRequest(BaseModel):
 class UploadImagesResponse(BaseModel):
     uploaded: List[str]
 
-# Helper functions
+class CreateUserRequest(BaseModel):
+    name: str
+    role: str
+
+class DeleteUserRequest(BaseModel):
+    email: str
+
     
 def load_faiss_index(event_id: str, dimension: int):
     if event_id is None:
@@ -187,7 +191,6 @@ def save_faiss_index(event_id: str, dimension: int = None):
     print(f"Saved FAISS index for event {event_id} to '{index_path}'")
     
 
-# Simulated CDN Storage Path
 CDN_STORAGE_PATH = "./cdn_storage/"
 os.makedirs(CDN_STORAGE_PATH, exist_ok=True)
 
@@ -357,7 +360,6 @@ async def get_current_user(
             role="admin"
         )
 
-    # Regular user logic
     try:
         user = await run_in_threadpool(
             users_collection.find_one, {"_id": ObjectId(user_id)}
@@ -386,7 +388,6 @@ async def get_current_admin(current_user: UserOut = Depends(get_current_user)) -
     return current_user
 
 
-# Routes
 
 
 @app.post("/admin/match_faces")
@@ -473,88 +474,35 @@ def run_face_matching():
         )
         print(f"Error in background task: {e}")
     
-@app.post("/auth/register")
-def register_user(user: RegisterUser):
-    global faiss_index
-    if users_collection.find_one({"email": user.email}):
-        raise HTTPException(status_code=400, detail="Email already registered.")
-
-    hashed_password = bcrypt.hashpw(user.password.encode('utf-8'), bcrypt.gensalt())
-
-    try:
-        img = decode_base64_image(user.image)
-        if img is None:
-            raise ValueError("Invalid image data")
-
-        box = localize_faces_func(img)
-        if not box:
-            raise ValueError("No face detected in the image")
-        x, y, w, h = box[0]
-        face_img = img[y:y+h, x:x+w]
-
-        vec = extract_features_func(face_img)
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process image: {e}")
-
-    # Insert user and get MongoDB's _id
-    user_data = {
-        "name": user.name,
-        "email": user.email,
-        "password": hashed_password.decode('utf-8'),
-        "image": user.image,
-        "joined_event": CURRENT_EVENT_ID,
-        "role": "user"
-    }
-
-    result = users_collection.insert_one(user_data)
-    mongo_id = result.inserted_id  
-
-    int_id = allocate_int_id_for(str(mongo_id))
-
-    feature_record = {
-        "_id": mongo_id,
-        "feature_vector": np.array(vec).tolist(),
-        "event_id": CURRENT_EVENT_ID
-    }
-
-    feature_vector_collection.update_one(
-        {"_id": mongo_id},
-        {"$set": feature_record},
-        upsert=True
-    )
-
-    if faiss_index is None:
-        faiss_index = load_faiss_index(CURRENT_EVENT_ID, dimension)
-
-    normed = normalize_vectors(np.array([vec]).astype("float32"))
-    faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
-    save_faiss_index(CURRENT_EVENT_ID)
-
-    return {
-        "id": str(mongo_id),
-        "name": user.name,
-        "email": user.email,
-        "image": user.image,
-        "joined_event": CURRENT_EVENT_ID,
-        "role": "user"
-    }
 
 @app.post("/auth/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await run_in_threadpool(users_collection.find_one, {"email": form_data.username})
-    if not user or not bcrypt.checkpw(form_data.password.encode('utf-8'), user["password"].encode('utf-8')):
+    username = form_data.username
+    password = form_data.password
+    if username == ADMIN_MAIL and password == ADMIN_PASSWORD:
+        access_token = create_access_token(data={"sub": "admin", "role": "admin"})
+        response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
+        response.set_cookie(
+            key="auth_token",
+            value=access_token,
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/"
+        )
+        return response
+    user = users_collection.find_one({"email": username})
+    if not user or not bcrypt.checkpw(password.encode(), user["password"].encode()):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
-
-    access_token = create_access_token(data={"sub": str(user["_id"]), "role": "user"})
+    access_token = create_access_token(data={"sub": str(user["_id"]), "role": user["role"]})
     response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
     response.set_cookie(
-    key="auth_token",
-    value=access_token,
-    httponly=True,
-    samesite="lax",    
-    secure=False,
-    path="/"
+        key="auth_token",
+        value=access_token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/"
     )
     return response
 
@@ -580,75 +528,149 @@ async def get_me(current_user: UserOut = Depends(get_current_user)):
 
 
 
+@app.post("/event/upload-images", response_model=UploadImagesResponse, status_code=201)
+async def event_upload_images(req: UploadImagesRequest, current_user: UserOut = Depends(get_current_user)):
+    if current_user.role in ["admin", "photographer"]:
+        event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+        os.makedirs(event_folder, exist_ok=True)
+        uploaded = []
+        for img in req.images:
+            header, _, payload = img.base64.partition(",")
+            try:
+                image_data = base64.b64decode(payload or img.base64)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid base64 image for file {img.filename}: {e}"
+                )
+            base_name, ext = os.path.splitext(img.filename)
+            original_filename = f"{base_name}_original{ext}"
+            original_path = os.path.join(event_folder, original_filename)
+            with open(original_path, "wb") as fout:
+                fout.write(image_data)
+            uploaded.append(original_filename)
+            try:
+                nparr = np.frombuffer(image_data, np.uint8)
+                img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img_np is None:
+                    raise ValueError("Decoded image is None")
+                preview = cv2.resize(img_np, (0, 0), fx=0.25, fy=0.25)
+                preview_filename = f"{base_name}_preview.jpeg"
+                preview_path = os.path.join(event_folder, preview_filename)
+                quality = 60
+                while True:
+                    success, buffer = cv2.imencode(".jpeg", preview, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                    if not success:
+                        raise ValueError("Failed to encode preview image")
+                    if len(buffer) <= 50 * 1024 or quality <= 30:
+                        break
+                    quality -= 5
+                with open(preview_path, "wb") as fout:
+                    fout.write(buffer)
+                uploaded.append(preview_filename)
+                compressed_filename = f"{base_name}_compressed.jpeg"
+                compressed_path = os.path.join(event_folder, compressed_filename)
+                quality = 80
+                while True:
+                    success, buffer = cv2.imencode(".jpeg", img_np, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                    if not success:
+                        raise ValueError("Failed to encode compressed image")
+                    if len(buffer) <= 512 * 1024 or quality <= 40:
+                        break
+                    quality -= 5
+                with open(compressed_path, "wb") as fout:
+                    fout.write(buffer)
+                uploaded.append(compressed_filename)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to generate preview/compressed version for {img.filename}: {e}"
+                )
+        return UploadImagesResponse(uploaded=uploaded)
+    elif current_user.role == "editor":
+        event_folder = os.path.join(CDN_STORAGE_PATH, f"{current_user.joined_event}_edited")
+        os.makedirs(event_folder, exist_ok=True)
+        uploaded = []
+        for img in req.images:
+            header, _, payload = img.base64.partition(",")
+            try:
+                image_data = base64.b64decode(payload or img.base64)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid base64 image for file {img.filename}: {e}"
+                )
+            base_name, ext = os.path.splitext(img.filename)
+            base_name = f"{base_name}_edited"
+            filename = f"{base_name}{ext}"
+            file_path = os.path.join(event_folder, filename)
+            with open(file_path, "wb") as fout:
+                fout.write(image_data)
+            uploaded.append(filename)
+        return UploadImagesResponse(uploaded=uploaded)
+    else:
+        raise HTTPException(status_code=403, detail="Not allowed to upload images")
+
+@app.get("/event/get-images")
+async def get_images(current_user: UserOut = Depends(get_current_user)):
+    images = []
+    if current_user.role in ["admin", "editor"]:
+        main_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+        if os.path.exists(main_folder):
+            for f in os.listdir(main_folder):
+                if f.lower().endswith("_preview.jpeg"):
+                    file_path = os.path.join(main_folder, f)
+                    try:
+                        with open(file_path, "rb") as image_file:
+                            encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                            images.append({
+                                "name": f,
+                                "folder": os.path.basename(main_folder),
+                                "base64": f"data:image/jpeg;base64,{encoded_string}"
+                            })
+                    except Exception as e:
+                        continue
+    else:
+        images = []
+    return {"images": images}
+
+@app.get("/event/download")
+async def download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
+    folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    if "_preview" in filename:
+        base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
+    else:
+        base_name = os.path.splitext(filename)[0]
+    if current_user.role in ["admin", "photographer"]:
+        compressed_filename = f"{base_name}_compressed.jpeg"
+        file_path = os.path.join(folder, compressed_filename)
+        if os.path.exists(file_path):
+            return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
+        raise HTTPException(status_code=404, detail="File not found")
+    elif current_user.role == "editor":
+        for ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]:
+            original_filename = f"{base_name}_original{ext}"
+            file_path = os.path.join(folder, original_filename)
+            if os.path.exists(file_path):
+                return FileResponse(path=file_path, filename=original_filename, media_type="application/octet-stream")
+        raise HTTPException(status_code=404, detail="File not found")
+    else:
+        raise HTTPException(status_code=403, detail="Not allowed to download images")
 
 
-@app.get("/event/get-images", response_model=List[dict])
-async def get_event_images(current_user: UserOut = Depends(get_current_user)):
-    event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
-    matches_path = os.path.join(event_folder, "matches.json")
-    if not os.path.exists(event_folder):
-        return []
-    
-
-    if not os.path.exists(matches_path):
-        return []
-
-    try:
-        with open(matches_path, "r") as f:
-            matches_data = json.load(f)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Invalid matches.json format")
-
-    image_dicts = []
-    if current_user.id not in matches_data['matches']:
-        print(current_user.id)
-        return image_dicts
-    for idx, filename in enumerate(matches_data['matches'][current_user.id]):
-        _, ext = os.path.splitext(filename)
-        if ext.lower() in ALLOWED_EXTENSIONS:
-            image_path = os.path.join(event_folder, filename)
-            if os.path.exists(image_path):
-                img = cv2.imread(image_path)
-                if img is None:
-                    continue
-                success, buffer = cv2.imencode(ext, img)
-                if not success:
-                    continue
-                encoded_string = base64.b64encode(buffer).decode("utf-8")
-                image_dicts.append({
-                    "id": idx,
-                    "image_base64": f"data:image/{ext[1:]};base64,{encoded_string}"
-                })
-    print("getting to here 1")
-    return image_dicts
-
-@app.post("/event/create-event")
-async def create_event(admin: UserOut = Depends(get_current_admin)):
-    global CURRENT_EVENT_ID
-    new_id = str(ObjectId())
-    settings_coll.update_one(
-        {"_id": "current_event"},
-        {"$set": {"event_id": new_id}},
-        upsert=True
-    )
-    CURRENT_EVENT_ID = new_id
-    users_collection.delete_many({})
-    feature_vector_collection.delete_many({})
-    user_id_map.delete_many({})
-
-    event_folder_path = os.path.join(CDN_STORAGE_PATH, new_id)
-    os.makedirs(event_folder_path, exist_ok=True) 
-    
-    return {"event_id": new_id}
-
+class RoleUploadImagesRequest(BaseModel):
+    images: List[Base64Image]
 
 @app.post("/event/upload-images", response_model=UploadImagesResponse, status_code=201)
-async def upload_event_images(req: UploadImagesRequest, admin: UserOut = Depends(get_current_admin)):
-    event_folder = os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID)
+async def role_upload_event_images(req: RoleUploadImagesRequest, current_user: UserOut = Depends(get_current_user)):
+    if current_user.role not in ["photographer", "editor"]:
+        raise HTTPException(status_code=403, detail="Not allowed to upload images")
+    if current_user.role == "editor":
+        event_folder = os.path.join(CDN_STORAGE_PATH, f"{current_user.joined_event}_edited")
+    else:
+        event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
     os.makedirs(event_folder, exist_ok=True)
-
     uploaded = []
-
     for img in req.images:
         header, _, payload = img.base64.partition(",")
         try:
@@ -658,142 +680,70 @@ async def upload_event_images(req: UploadImagesRequest, admin: UserOut = Depends
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid base64 image for file {img.filename}: {e}"
             )
-
         base_name, ext = os.path.splitext(img.filename)
-        original_filename = f"{base_name}_original{ext}"
-        original_path = os.path.join(event_folder, original_filename)
-
-        with open(original_path, "wb") as fout:
+        if current_user.role == "editor":
+            base_name = f"{base_name}_edited"
+        filename = f"{base_name}{ext}"
+        file_path = os.path.join(event_folder, filename)
+        with open(file_path, "wb") as fout:
             fout.write(image_data)
-        uploaded.append(original_filename)
-
-        try:
-            nparr = np.frombuffer(image_data, np.uint8)
-            img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if img_np is None:
-                raise ValueError("Decoded image is None")
-            preview = cv2.resize(img_np, (0, 0), fx=0.25, fy=0.25)
-            preview_filename = f"{base_name}_preview.jpeg"
-            preview_path = os.path.join(event_folder, preview_filename)
-
-            quality = 60
-            while True:
-                success, buffer = cv2.imencode(".jpeg", preview, [cv2.IMWRITE_JPEG_QUALITY, quality])
-                if not success:
-                    raise ValueError("Failed to encode preview image")
-                if len(buffer) <= 50 * 1024 or quality <= 30:
-                    break
-                quality -= 5
-            with open(preview_path, "wb") as fout:
-                fout.write(buffer)
-            uploaded.append(preview_filename)
-
-            compressed_filename = f"{base_name}_compressed.jpeg"
-            compressed_path = os.path.join(event_folder, compressed_filename)
-
-            quality = 80
-            while True:
-                success, buffer = cv2.imencode(".jpeg", img_np, [cv2.IMWRITE_JPEG_QUALITY, quality])
-                if not success:
-                    raise ValueError("Failed to encode compressed image")
-                if len(buffer) <= 512 * 1024 or quality <= 40:
-                    break
-                quality -= 5
-            with open(compressed_path, "wb") as fout:
-                fout.write(buffer)
-            uploaded.append(compressed_filename)
-
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to generate preview/compressed version for {img.filename}: {e}"
-            )
-
+        uploaded.append(filename)
     return UploadImagesResponse(uploaded=uploaded)
 
-
-@app.post("/auth/admin/login")
-async def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
-    username = form_data.username
-    password = form_data.password
-
-    if username == ADMIN_MAIL and password == ADMIN_PASSWORD:
-        access_token = create_access_token(data={"sub": "admin", "role": "admin"})
-        response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
-        response.set_cookie(
-            key="auth_token",
-            value=access_token,
-            httponly=True,
-            samesite="lax",
-            secure=False,
-            path="/"
-        )
-        return response
-
-    user = employees_collection.find_one({"email": username})
-    if not user or not bcrypt.checkpw(password.encode(), user["password"].encode()):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    user_role = user.get("role", "user")
-    access_token = create_access_token(data={"sub": str(user["_id"]), "role": user_role})
-
-    response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
-    response.set_cookie(
-        key="auth_token",
-        value=access_token,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        path="/"
-    )
-    return response
-
-@app.get("/event/images")
-def list_event_images(admin: UserOut = Depends(get_current_admin)):
-    folder = os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID)
-    if not os.path.exists(folder):
-        return {"images": []}
-
-    images = []
-
-    for f in os.listdir(folder):
-        if (
-            f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-            and f.lower().rsplit(".", 1)[0].endswith("_preview")
-        ):
-            filepath = os.path.join(folder, f)
-            try:
-                with open(filepath, "rb") as image_file:
-                    encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                    mime = "image/jpeg"
-                    if f.lower().endswith(".png"):
-                        mime = "image/png"
-                    elif f.lower().endswith(".webp"):
-                        mime = "image/webp"
-                    data_uri = f"data:{mime};base64,{encoded_string}"
-                    images.append({"name": f, "base64": data_uri})
-            except Exception as e:
-                print(f"Error reading file {f}: {e}")
-
-    return {"images": images}
-
-
-@app.get("/event/download")
-def download_image(filename: str = Query(...), admin: UserOut = Depends(get_current_admin)):
-    parts = filename.rsplit(".", 1)
-    if len(parts) != 2:
-        return JSONResponse(status_code=400, content={"detail": "Invalid filename format"})
-    original_filename = parts[0].replace("_preview", "_original") + "." + parts[1]
-    print(original_filename)
-    folder = os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID)
-    file_path = os.path.join(folder, original_filename)
+@app.get("/event/role-download")
+def role_download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
+    if current_user.role != "editor":
+        raise HTTPException(status_code=403, detail="Only editors can download images")
+    folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    file_path = os.path.join(folder, filename)
     if not os.path.exists(file_path):
         return JSONResponse(status_code=404, content={"detail": "File not found"})
     return FileResponse(
         path=file_path,
-        filename=original_filename,
+        filename=filename,
         media_type="application/octet-stream"
     )
+
+@app.post("/admin/create-user")
+def create_user(req: CreateUserRequest, admin: UserOut = Depends(get_current_admin)):
+    if req.role not in ["photographer", "editor"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    email = f"{req.name}@arka.ai"
+    password = token_urlsafe(8) 
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    user_data = {
+        "name": req.name,
+        "email": email,
+        "password": hashed_password.decode('utf-8'),
+        "role": req.role,
+        "joined_event": CURRENT_EVENT_ID,
+        "image": ""
+    }
+    if users_collection.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="User already exists")
+    users_collection.insert_one(user_data)
+    return {"email": email, "password": password, "role": req.role}
+
+@app.get("/admin/list-users")
+def list_users(admin: UserOut = Depends(get_current_admin)):
+    users = list(users_collection.find({"role": {"$in": ["photographer", "editor"]}}))
+    result = []
+    for user in users:
+        result.append({
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "role": user.get("role"),
+            "password": user.get("password"),
+        })
+    return {"users": result}
+
+@app.post("/admin/delete-user")
+def delete_user(req: DeleteUserRequest, admin: UserOut = Depends(get_current_admin)):
+    user = users_collection.find_one({"email": req.email, "role": {"$in": ["photographer", "editor"]}})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found or not allowed to delete")
+    users_collection.delete_one({"_id": user["_id"]})
+    return {"success": True, "email": req.email}
 
 
 
@@ -836,3 +786,8 @@ async def root():
 
 
 
+def main():
+        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+if __name__ == "__main__":
+    main()

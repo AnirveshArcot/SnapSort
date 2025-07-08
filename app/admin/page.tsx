@@ -5,8 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserNav } from "@/components/user-nav";
 import { Button } from "@/components/ui/button";
-import { downloadImageBlob, getSession, getPreviwes, uploadEventImages } from "@/lib/api";
-import { createNewEvent, matchFaces } from "@/lib/api";
+import { uploadImages, getImages, downloadImageBlob, createUserAsAdmin, getAllUsersForAdmin, deleteUserAsAdmin, getSession } from "@/lib/api";
 import imageCompression from 'browser-image-compression';
 
 interface User {
@@ -27,6 +26,26 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
   const [imageList, setImageList] = useState<{ name: string; base64: string }[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // --- Manage Users State ---
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserRole, setNewUserRole] = useState("photographer");
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createdUser, setCreatedUser] = useState<{ email: string; password: string; role: string } | null>(null);
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingUser(true);
+    setCreatedUser(null);
+    try {
+      const res = await createUserAsAdmin(newUserName, newUserRole);
+      setCreatedUser(res);
+      setNewUserName("");
+      setNewUserRole("photographer");
+    } catch (err: any) {
+      alert(err.message || "Failed to create user");
+    }
+    setCreatingUser(false);
+  };
 
   const handleDownload = async (filename: string) => {
     try {
@@ -49,8 +68,8 @@ export default function AdminPage() {
 
   const fetchImages = async () => {
     try {
-      const images = await getPreviwes();
-      setImageList(images);
+      const res = await getImages();
+      setImageList(res.images || []);
     } catch (err) {
       console.error("Failed to fetch images:", err);
     }
@@ -103,7 +122,7 @@ export default function AdminPage() {
             })
           );
 
-          const { uploaded } = await uploadEventImages(base64Payload);
+          const { uploaded } = await uploadImages(base64Payload);
           console.log(`Batch uploaded (${uploaded.length} files)`);
 
           setUploadProgress(Math.round(((i + BATCH_SIZE) / selectedFiles.length) * 100));
@@ -111,6 +130,8 @@ export default function AdminPage() {
 
         alert("All images uploaded successfully!");
         setSelectedFiles([]);
+        // Refresh images after upload if allowed
+        if (isAdmin || isEditor) await fetchImages();
       } catch (err: any) {
         console.error(err);
         alert(`Upload failed: ${err.message || err}`);
@@ -120,23 +141,29 @@ export default function AdminPage() {
       setUploadProgress(0);
     };
 
-  const handleCreateEvent = async () => {
-    if (!confirm("Are you sure you want to create a new event?")) return;
+  // Remove handleCreateEvent and handleMatchFaces functions
 
+  // --- Users Table State ---
+  const [userList, setUserList] = useState<{ name: string; email: string; role: string; password: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const fetchUserList = async () => {
+    setLoadingUsers(true);
     try {
-      const data = await createNewEvent();
-      console.log(`Event created with ID: ${data.event_id}`);
-    } catch (err: any) {
-      console.error(err);
+      const res = await getAllUsersForAdmin();
+      setUserList(res.users || []);
+    } catch (err) {
+      setUserList([]);
     }
+    setLoadingUsers(false);
   };
 
-  const handleMatchFaces = async () => {
+  const handleDeleteUser = async (email: string) => {
+    if (!confirm(`Are you sure you want to delete user ${email}?`)) return;
     try {
-      const data = await matchFaces(/* any request body here, if needed */);
-      console.log(`Matching complet`);
+      await deleteUserAsAdmin(email);
+      await fetchUserList();
     } catch (err: any) {
-      console.error(err);
+      alert(err.message || "Failed to delete user");
     }
   };
 
@@ -144,21 +171,28 @@ export default function AdminPage() {
   useEffect(() => {
     (async () => {
       const sessionUser = await getSession();
-
       if (sessionUser) {
-        if (sessionUser.role !== "admin") {
+        if (sessionUser.role !== "admin" && sessionUser.role !== "photographer" && sessionUser.role !== "editor") {
           router.push("/");
           return;
         }
         setUser(sessionUser);
-        
         setChecking(false);
-        await fetchImages();
+        // Only fetch user list if admin
+        if (sessionUser.role === "admin") {
+          await fetchUserList();
+        }
+        // Only fetch images if admin or editor (for download section)
+        if (sessionUser.role === "admin" || sessionUser.role === "editor") {
+          await fetchImages();
+        }
       } else {
         router.push("/login");
       }
     })();
   }, [router]);
+
+  // Remove useEffect that fetches user list on user change (handled above)
 
   if (checking) {
     return (
@@ -167,6 +201,11 @@ export default function AdminPage() {
       </div>
     );
   }
+
+  // --- Role-based UI ---
+  const isAdmin = user?.role === "admin";
+  const isPhotographer = user?.role === "photographer";
+  const isEditor = user?.role === "editor";
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -202,65 +241,143 @@ export default function AdminPage() {
       <h2 className="text-2xl font-semibold my-6 px-3 sm:px-10">Admin Panel</h2>
 
       <div className="px-3 sm:px-10 space-y-6">
-        <div className="space-y-2">
-          <label className="font-medium">Upload Images</label>
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            onChange={handleFileChange}
-            className="block"
-          />
-          <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
-            {uploading ? "Uploading…" : "Upload Selected Images"}
-          </Button>
-          {uploading && (
-          <div className="mt-2 w-full bg-gray-200 rounded-full h-4 overflow-hidden">
-            <div
-              className="h-4 bg-blue-500 transition-all duration-300 ease-out"
-              style={{ width: `${uploadProgress}%` }}
-            />
+        {/* --- Admin-only: Manage Users Section --- */}
+        {isAdmin && (
+          <div className="border rounded-lg p-4 mb-6 bg-gray-50">
+            <h3 className="text-lg font-semibold mb-2">Manage Users</h3>
+            <form className="flex flex-col sm:flex-row gap-2 items-start sm:items-end" onSubmit={handleCreateUser}>
+              <div>
+                <label className="block text-sm font-medium">Name</label>
+                <input
+                  type="text"
+                  value={newUserName}
+                  onChange={e => setNewUserName(e.target.value)}
+                  required
+                  className="border rounded px-2 py-1 w-40"
+                  placeholder="Enter name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium">Role</label>
+                <select
+                  value={newUserRole}
+                  onChange={e => setNewUserRole(e.target.value)}
+                  className="border rounded px-2 py-1 w-40"
+                >
+                  <option value="photographer">Photographer</option>
+                  <option value="editor">Editor</option>
+                </select>
+              </div>
+              <Button type="submit" disabled={creatingUser || !newUserName} className="mt-4 sm:mt-0">
+                {creatingUser ? "Creating..." : "Create User"}
+              </Button>
+            </form>
+            {createdUser && (
+              <div className="mt-4 bg-green-100 border border-green-300 rounded p-3">
+                <div className="font-medium">User Created!</div>
+                <div>Email: <span className="font-mono">{createdUser.email}</span></div>
+                <div>Password: <span className="font-mono">{createdUser.password}</span></div>
+                <div>Role: <span className="font-mono">{createdUser.role}</span></div>
+              </div>
+            )}
           </div>
-          )}
+        )}
+        {/* --- Admin-only: Users Table Section --- */}
+        {isAdmin && (
+          <div className="border rounded-lg p-4 mb-6 bg-gray-50">
+            <h3 className="text-lg font-semibold mb-2">All Users (Photographers & Editors)</h3>
+            {loadingUsers ? (
+              <div>Loading users…</div>
+            ) : userList.length === 0 ? (
+              <div>No users found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border text-sm">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="border px-2 py-1">Name</th>
+                      <th className="border px-2 py-1">Email</th>
+                      <th className="border px-2 py-1">Role</th>
+                      <th className="border px-2 py-1">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userList.map((u, idx) => (
+                      <tr key={u.email + idx}>
+                        <td className="border px-2 py-1 font-mono">{u.name}</td>
+                        <td className="border px-2 py-1 font-mono">{u.email}</td>
+                        <td className="border px-2 py-1">{u.role}</td>
+                        <td className="border px-2 py-1">
+                          <Button variant="destructive" size="sm" onClick={() => handleDeleteUser(u.email)}>
+                            Delete
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <Button onClick={fetchUserList} className="mt-2">Refresh List</Button>
+          </div>
+        )}
+        {/* --- Upload Section: Photographers, Editors, Admin --- */}
+        {(isAdmin || isPhotographer || isEditor) && (
+          <div className="space-y-2">
+            <label className="font-medium">Upload Images</label>
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handleFileChange}
+              className="block"
+            />
+            <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
+              {uploading ? "Uploading…" : "Upload Selected Images"}
+            </Button>
+            {uploading && (
+              <div className="mt-2 w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                <div
+                  className="h-4 bg-blue-500 transition-all duration-300 ease-out"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            )}
             <p className="text-sm mt-1 text-muted-foreground">
               {uploading ? `Uploading... ${uploadProgress}%` : ""}
             </p>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="space-y-2">
-          <Button onClick={handleCreateEvent}>Create New Event</Button>
-          <Button onClick={handleMatchFaces} className="ml-4">
-            Match Faces
-          </Button>
-        </div>
-        <div className="space-y-2">
-          <h3 className="text-lg font-semibold">Uploaded Images</h3>
-          {imageList.length ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {imageList.map((img) => (
-                <div
-                  key={img.name}
-                  className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
-                >
-                  <img
-                    src={img.base64}
-                    alt={img.name}
-                    className="w-full h-48 object-cover"
-                  />
-                  <div className="p-2 flex justify-between items-center text-sm">
-                    <span className="truncate" title={img.name}>{img.name}</span>
-                    <Button onClick={() => handleDownload(img.name)}>
-                      Download
-                    </Button>
+          </div>
+        )}
+        {/* --- Download Section: Editors and Admin only (main folder images) --- */}
+        {(isAdmin || isEditor) && (
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold">Uploaded Images</h3>
+            {imageList.length ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {imageList.map((img) => (
+                  <div
+                    key={img.name}
+                    className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
+                  >
+                    <img
+                      src={img.base64}
+                      alt={img.name}
+                      className="w-full h-48 object-cover"
+                    />
+                    <div className="p-2 flex justify-between items-center text-sm">
+                      <span className="truncate" title={img.name}>{img.name}</span>
+                      <Button onClick={() => handleDownload(img.name)}>
+                        Download
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
-          )}
-        </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

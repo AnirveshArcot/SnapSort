@@ -35,7 +35,7 @@ export default function EventImagesPage() {
       const sessionUser = await getSession();
 
       if (sessionUser) {
-        if(sessionUser.role=='admin'){
+        if(sessionUser.role=='admin' || sessionUser.role=='photographer' || sessionUser.role=='editor'){
           router.push("/admin");
           return;
         }
