@@ -5,8 +5,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserNav } from "@/components/user-nav";
 import { Button } from "@/components/ui/button";
-import { uploadImages, getImages, downloadImageBlob, createUserAsAdmin, getAllUsersForAdmin, deleteUserAsAdmin, getSession } from "@/lib/api";
+import { uploadImages, getImages, downloadImageBlob, createUserAsAdmin, getAllUsersForAdmin, deleteUserAsAdmin, getSession, matchFaces, createNewEvent } from "@/lib/api";
 import imageCompression from 'browser-image-compression';
+import { toast } from "sonner";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface User {
   id: string;
@@ -26,12 +28,21 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
   const [imageList, setImageList] = useState<{ name: string; base64: string }[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
-
   // --- Manage Users State ---
   const [newUserName, setNewUserName] = useState("");
   const [newUserRole, setNewUserRole] = useState("photographer");
   const [creatingUser, setCreatingUser] = useState(false);
   const [createdUser, setCreatedUser] = useState<{ email: string; password: string; role: string } | null>(null);
+  // --- Users Table State ---
+  const [userList, setUserList] = useState<{ name: string; email: string; role: string; password: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  // --- Matching State ---
+  const [matching, setMatching] = useState(false);
+  const [creatingEvent, setCreatingEvent] = useState(false);
+  const [createdEvent, setCreatedEvent] = useState<any>(null);
+  // --- Tabs State ---
+  const [activeTab, setActiveTab] = useState("event");
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreatingUser(true);
@@ -143,9 +154,20 @@ export default function AdminPage() {
 
   // Remove handleCreateEvent and handleMatchFaces functions
 
-  // --- Users Table State ---
-  const [userList, setUserList] = useState<{ name: string; email: string; role: string; password: string }[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  // --- Create New Event Handler (Admin Only) ---
+  const handleCreateEvent = async () => {
+    setCreatingEvent(true);
+    setCreatedEvent(null);
+    try {
+      const res = await createNewEvent();
+      setCreatedEvent(res);
+      toast.success(res.message || "Event created successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create event");
+    }
+    setCreatingEvent(false);
+  };
+
   const fetchUserList = async () => {
     setLoadingUsers(true);
     try {
@@ -165,6 +187,18 @@ export default function AdminPage() {
     } catch (err: any) {
       alert(err.message || "Failed to delete user");
     }
+  };
+
+  // --- Match Faces Handler (Admin Only) ---
+  const handleMatchFaces = async () => {
+    setMatching(true);
+    try {
+      const res = await matchFaces();
+      toast.success(res.message || "Face matching started");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to start face matching");
+    }
+    setMatching(false);
   };
 
 
@@ -240,143 +274,176 @@ export default function AdminPage() {
 
       <h2 className="text-2xl font-semibold my-6 px-3 sm:px-10">Admin Panel</h2>
 
-      <div className="px-3 sm:px-10 space-y-6">
-        {/* --- Admin-only: Manage Users Section --- */}
-        {isAdmin && (
-          <div className="border rounded-lg p-4 mb-6 bg-gray-50">
-            <h3 className="text-lg font-semibold mb-2">Manage Users</h3>
-            <form className="flex flex-col sm:flex-row gap-2 items-start sm:items-end" onSubmit={handleCreateUser}>
-              <div>
-                <label className="block text-sm font-medium">Name</label>
-                <input
-                  type="text"
-                  value={newUserName}
-                  onChange={e => setNewUserName(e.target.value)}
-                  required
-                  className="border rounded px-2 py-1 w-40"
-                  placeholder="Enter name"
-                />
+      <div className="px-3 sm:px-10">
+        {(isAdmin || isEditor || isPhotographer) && (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="mb-6">
+              <TabsTrigger value="event">Event Management</TabsTrigger>
+              {isAdmin && <TabsTrigger value="users">User Management</TabsTrigger>}
+            </TabsList>
+            <TabsContent value="event">
+              {/* Event Management Tab: event creation, match faces, upload, images */}
+              <div className="flex flex-row gap-2 mb-4">
+                {isAdmin && (
+                  <Button onClick={handleCreateEvent} disabled={creatingEvent}>
+                    {creatingEvent ? "Creating Event…" : "Create New Event"}
+                  </Button>
+                )}
+                {isAdmin && (
+                  <Button onClick={handleMatchFaces} disabled={matching}>
+                    {matching ? "Matching Faces…" : "Match Faces"}
+                  </Button>
+                )}
               </div>
-              <div>
-                <label className="block text-sm font-medium">Role</label>
-                <select
-                  value={newUserRole}
-                  onChange={e => setNewUserRole(e.target.value)}
-                  className="border rounded px-2 py-1 w-40"
-                >
-                  <option value="photographer">Photographer</option>
-                  <option value="editor">Editor</option>
-                </select>
-              </div>
-              <Button type="submit" disabled={creatingUser || !newUserName} className="mt-4 sm:mt-0">
-                {creatingUser ? "Creating..." : "Create User"}
-              </Button>
-            </form>
-            {createdUser && (
-              <div className="mt-4 bg-green-100 border border-green-300 rounded p-3">
-                <div className="font-medium">User Created!</div>
-                <div>Email: <span className="font-mono">{createdUser.email}</span></div>
-                <div>Password: <span className="font-mono">{createdUser.password}</span></div>
-                <div>Role: <span className="font-mono">{createdUser.role}</span></div>
-              </div>
-            )}
-          </div>
-        )}
-        {/* --- Admin-only: Users Table Section --- */}
-        {isAdmin && (
-          <div className="border rounded-lg p-4 mb-6 bg-gray-50">
-            <h3 className="text-lg font-semibold mb-2">All Users (Photographers & Editors)</h3>
-            {loadingUsers ? (
-              <div>Loading users…</div>
-            ) : userList.length === 0 ? (
-              <div>No users found.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full border text-sm">
-                  <thead>
-                    <tr className="bg-gray-100">
-                      <th className="border px-2 py-1">Name</th>
-                      <th className="border px-2 py-1">Email</th>
-                      <th className="border px-2 py-1">Role</th>
-                      <th className="border px-2 py-1">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {userList.map((u, idx) => (
-                      <tr key={u.email + idx}>
-                        <td className="border px-2 py-1 font-mono">{u.name}</td>
-                        <td className="border px-2 py-1 font-mono">{u.email}</td>
-                        <td className="border px-2 py-1">{u.role}</td>
-                        <td className="border px-2 py-1">
-                          <Button variant="destructive" size="sm" onClick={() => handleDeleteUser(u.email)}>
-                            Delete
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <Button onClick={fetchUserList} className="mt-2">Refresh List</Button>
-          </div>
-        )}
-        {/* --- Upload Section: Photographers, Editors, Admin --- */}
-        {(isAdmin || isPhotographer || isEditor) && (
-          <div className="space-y-2">
-            <label className="font-medium">Upload Images</label>
-            <input
-              type="file"
-              multiple
-              accept="image/*"
-              onChange={handleFileChange}
-              className="block"
-            />
-            <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
-              {uploading ? "Uploading…" : "Upload Selected Images"}
-            </Button>
-            {uploading && (
-              <div className="mt-2 w-full bg-gray-200 rounded-full h-4 overflow-hidden">
-                <div
-                  className="h-4 bg-blue-500 transition-all duration-300 ease-out"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-            )}
-            <p className="text-sm mt-1 text-muted-foreground">
-              {uploading ? `Uploading... ${uploadProgress}%` : ""}
-            </p>
-          </div>
-        )}
-        {/* --- Download Section: Editors and Admin only (main folder images) --- */}
-        {(isAdmin || isEditor) && (
-          <div className="space-y-2">
-            <h3 className="text-lg font-semibold">Uploaded Images</h3>
-            {imageList.length ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {imageList.map((img) => (
-                  <div
-                    key={img.name}
-                    className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
-                  >
-                    <img
-                      src={img.base64}
-                      alt={img.name}
-                      className="w-full h-48 object-cover"
-                    />
-                    <div className="p-2 flex justify-between items-center text-sm">
-                      <span className="truncate" title={img.name}>{img.name}</span>
-                      <Button onClick={() => handleDownload(img.name)}>
-                        Download
-                      </Button>
+              {isAdmin && createdEvent && (
+                <div className="bg-green-100 border border-green-300 rounded p-3 mb-4">
+                  <div className="font-medium">Event Created!</div>
+                  {createdEvent.code && (
+                    <div>Event Code: <span className="font-mono">{createdEvent.code}</span></div>
+                  )}
+                  {createdEvent.id && (
+                    <div>Event ID: <span className="font-mono">{createdEvent.id}</span></div>
+                  )}
+                </div>
+              )}
+              {/* Upload Section: Photographers, Editors, Admin */}
+              {(isAdmin || isPhotographer || isEditor) && (
+                <div className="space-y-2 mb-6">
+                  <label className="font-medium">Upload Images</label>
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="block"
+                  />
+                  <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
+                    {uploading ? "Uploading…" : "Upload Selected Images"}
+                  </Button>
+                  {uploading && (
+                    <div className="mt-2 w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                      <div
+                        className="h-4 bg-blue-500 transition-all duration-300 ease-out"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
+                  )}
+                  <p className="text-sm mt-1 text-muted-foreground">
+                    {uploading ? `Uploading... ${uploadProgress}%` : ""}
+                  </p>
+                </div>
+              )}
+              {/* Images grid (admin/editor) */}
+              {(isAdmin || isEditor) && (
+                <div className="space-y-2">
+                  <h3 className="text-lg font-semibold">Uploaded Images</h3>
+                  {imageList.length ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                      {imageList.map((img) => (
+                        <div
+                          key={img.name}
+                          className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
+                        >
+                          <img
+                            src={img.base64}
+                            alt={img.name}
+                            className="w-full h-48 object-cover"
+                          />
+                          <div className="p-2 flex justify-between items-center text-sm">
+                            <span className="truncate" title={img.name}>{img.name}</span>
+                            <Button onClick={() => handleDownload(img.name)}>
+                              Download
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+            {isAdmin && (
+              <TabsContent value="users">
+                {/* User Management Tab */}
+                <div className="border rounded-lg p-4 mb-6 bg-gray-50">
+                  <h3 className="text-lg font-semibold mb-2">Manage Users</h3>
+                  <form className="flex flex-col sm:flex-row gap-2 items-start sm:items-end" onSubmit={handleCreateUser}>
+                    <div>
+                      <label className="block text-sm font-medium">Name</label>
+                      <input
+                        type="text"
+                        value={newUserName}
+                        onChange={e => setNewUserName(e.target.value)}
+                        required
+                        className="border rounded px-2 py-1 w-40"
+                        placeholder="Enter name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium">Role</label>
+                      <select
+                        value={newUserRole}
+                        onChange={e => setNewUserRole(e.target.value)}
+                        className="border rounded px-2 py-1 w-40"
+                      >
+                        <option value="photographer">Photographer</option>
+                        <option value="editor">Editor</option>
+                      </select>
+                    </div>
+                    <Button type="submit" disabled={creatingUser || !newUserName} className="mt-4 sm:mt-0">
+                      {creatingUser ? "Creating..." : "Create User"}
+                    </Button>
+                  </form>
+                  {createdUser && (
+                    <div className="mt-4 bg-green-100 border border-green-300 rounded p-3">
+                      <div className="font-medium">User Created!</div>
+                      <div>Email: <span className="font-mono">{createdUser.email}</span></div>
+                      <div>Password: <span className="font-mono">{createdUser.password}</span></div>
+                      <div>Role: <span className="font-mono">{createdUser.role}</span></div>
+                    </div>
+                  )}
+                </div>
+                <div className="border rounded-lg p-4 mb-6 bg-gray-50">
+                  <h3 className="text-lg font-semibold mb-2">All Users (Photographers & Editors)</h3>
+                  {loadingUsers ? (
+                    <div>Loading users…</div>
+                  ) : userList.length === 0 ? (
+                    <div>No users found.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full border text-sm">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="border px-2 py-1">Name</th>
+                            <th className="border px-2 py-1">Email</th>
+                            <th className="border px-2 py-1">Role</th>
+                            <th className="border px-2 py-1">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {userList.map((u, idx) => (
+                            <tr key={u.email + idx}>
+                              <td className="border px-2 py-1 font-mono">{u.name}</td>
+                              <td className="border px-2 py-1 font-mono">{u.email}</td>
+                              <td className="border px-2 py-1">{u.role}</td>
+                              <td className="border px-2 py-1">
+                                <Button variant="destructive" size="sm" onClick={() => handleDeleteUser(u.email)}>
+                                  Delete
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <Button onClick={fetchUserList} className="mt-2">Refresh List</Button>
+                </div>
+              </TabsContent>
             )}
-          </div>
+          </Tabs>
         )}
       </div>
     </div>

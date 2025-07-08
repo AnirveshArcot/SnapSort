@@ -90,6 +90,13 @@ export async function createUserAsAdmin(name: string, role: string) {
   });
 }
 
+export async function createNewEvent() {
+  return await fetchAPI("/event/create-event", {
+    method: "POST",
+  });
+}
+
+
 export async function getAllUsersForAdmin() {
   return fetchAPI('/admin/list-users', {
     method: 'GET',
@@ -101,5 +108,11 @@ export async function deleteUserAsAdmin(email: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
+  });
+}
+
+export async function matchFaces() {
+  return await fetchAPI("/event/match-faces", {
+    method: "POST",
   });
 }

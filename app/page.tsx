@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { getEventImages, getSession } from "@/lib/api";
+import { getSession, getImages } from "@/lib/api";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserNav } from "@/components/user-nav";
@@ -18,9 +18,10 @@ interface User {
   role: string;
 }
 
+// Adjust EventImage interface to match API response
 interface EventImage {
-  id: number;
-  image_base64: string;
+  name: string;
+  base64: string;
 }
 
 export default function EventImagesPage() {
@@ -33,15 +34,18 @@ export default function EventImagesPage() {
   useEffect(() => {
     (async () => {
       const sessionUser = await getSession();
-
       if (sessionUser) {
-        if(sessionUser.role=='admin' || sessionUser.role=='photographer' || sessionUser.role=='editor'){
+        if(sessionUser.role === "admin" || sessionUser.role === "photographer" || sessionUser.role === "editor"){
           router.push("/admin");
           return;
         }
         setUser(sessionUser);
-        const imgs = await getEventImages();
-        setImages(imgs);
+        try {
+          const res = await getImages();
+          setImages(res.images || []);
+        } catch (err) {
+          setImages([]);
+        }
         setLoadingImages(false);
         setChecking(false);
       } else {
@@ -84,9 +88,11 @@ export default function EventImagesPage() {
       </header>
 
       <h2 className="text-2xl font-semibold my-4 px-3 sm:px-10">Event Images</h2>
-      {loadingImages === true ? (<div className="flex items-center justify-center h-screen">
-        <p>Loading Images....</p>
-      </div>): (images.length === 0 ? (
+      {loadingImages ? (
+        <div className="flex items-center justify-center h-screen">
+          <p>Loading Images....</p>
+        </div>
+      ) : images.length === 0 ? (
         <div className="text-center py-12 border rounded-lg">
           <p className="text-muted-foreground">
             No images have been uploaded to this event yet.
@@ -94,12 +100,12 @@ export default function EventImagesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-3 sm:px-10">
-          {images.map((image) => (
-            <div key={image.id} className="border rounded-lg overflow-hidden">
+          {images.map((image, idx) => (
+            <div key={image.name + idx} className="border rounded-lg overflow-hidden shadow hover:shadow-md transition">
               <div className="relative aspect-square">
                 <Image
-                  src={image.image_base64}
-                  alt={`Image`}
+                  src={image.base64}
+                  alt={image.name}
                   fill
                   className="object-cover"
                 />
@@ -107,8 +113,7 @@ export default function EventImagesPage() {
             </div>
           ))}
         </div>
-      ))}
-      
+      )}
     </div>
   );
 }

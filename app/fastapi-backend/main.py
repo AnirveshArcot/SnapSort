@@ -356,7 +356,7 @@ async def get_current_user(
             name="ADMIN",
             email=ADMIN_MAIL,
             image="",
-            joined_event="ADMIN",
+            joined_event=CURRENT_EVENT_ID,
             role="admin"
         )
 
@@ -375,7 +375,7 @@ async def get_current_user(
         name=user["name"],
         email=user["email"],
         image=user.get("image"),
-        joined_event=user.get("joined_event"),
+        joined_event=CURRENT_EVENT_ID,
         role=user.get("role", "user")
     )
 
@@ -473,6 +473,78 @@ def run_face_matching():
             upsert=True
         )
         print(f"Error in background task: {e}")
+
+
+@app.post("/auth/register")
+def register_user(user: RegisterUser):
+    global faiss_index
+
+    if users_collection.find_one({"email": user.email}):
+        raise HTTPException(status_code=400, detail="Email already registered.")
+
+    hashed_password = bcrypt.hashpw(user.password.encode('utf-8'), bcrypt.gensalt())
+
+    try:
+        img = decode_base64_image(user.image)
+        if img is None:
+            raise ValueError("Invalid image data")
+
+        box = localize_faces_func(img)
+        if not box:
+            raise ValueError("No face detected in the image")
+
+        x, y, w, h = box[0]
+        face_img = img[y:y + h, x:x + w]
+
+        vec = extract_features_func(face_img)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process image: {e}")
+
+    # Insert user and get MongoDB's _id
+    user_data = {
+        "name": user.name,
+        "email": user.email,
+        "password": hashed_password.decode('utf-8'),
+        "image": user.image,
+        "joined_event": CURRENT_EVENT_ID,
+        "role": "user"
+    }
+
+    result = users_collection.insert_one(user_data)
+    mongo_id = result.inserted_id
+
+    int_id = allocate_int_id_for(str(mongo_id))
+
+    feature_record = {
+        "_id": mongo_id,
+        "feature_vector": np.array(vec).tolist(),
+        "event_id": CURRENT_EVENT_ID
+    }
+
+    feature_vector_collection.update_one(
+        {"_id": mongo_id},
+        {"$set": feature_record},
+        upsert=True
+    )
+
+    if faiss_index is None:
+        faiss_index = load_faiss_index(CURRENT_EVENT_ID, dimension)
+
+    normed = normalize_vectors(np.array([vec]).astype("float32"))
+    faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
+
+    save_faiss_index(CURRENT_EVENT_ID)
+
+    return {
+        "id": str(mongo_id),
+        "name": user.name,
+        "email": user.email,
+        "image": user.image,
+        "joined_event": CURRENT_EVENT_ID,
+        "role": "user"
+    }
+
     
 
 @app.post("/auth/login")
@@ -506,6 +578,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     return response
 
+
+
+
+
+
+
 @app.post("/auth/logout")
 def logout(response: Response):
     response.delete_cookie(
@@ -522,7 +600,7 @@ async def get_me(current_user: UserOut = Depends(get_current_user)):
         name=current_user.name,
         email=current_user.email,
         image=current_user.image,
-        joined_event=current_user.joined_event,
+        joined_event=CURRENT_EVENT_ID,
         role=current_user.role,
     )
 
@@ -723,6 +801,30 @@ def create_user(req: CreateUserRequest, admin: UserOut = Depends(get_current_adm
         raise HTTPException(status_code=400, detail="User already exists")
     users_collection.insert_one(user_data)
     return {"email": email, "password": password, "role": req.role}
+
+@app.post("/event/create-event")
+async def create_event(admin: UserOut = Depends(get_current_admin)):
+    global CURRENT_EVENT_ID
+
+    new_id = str(ObjectId())
+
+    settings_coll.update_one(
+        {"_id": "current_event"},
+        {"$set": {"event_id": new_id}},
+        upsert=True
+    )
+
+    CURRENT_EVENT_ID = new_id
+
+    users_collection.delete_many({})
+    feature_vector_collection.delete_many({})
+    user_id_map.delete_many({})
+
+    event_folder_path = os.path.join(CDN_STORAGE_PATH, new_id)
+    os.makedirs(event_folder_path, exist_ok=True)
+
+    return {"event_id": new_id}
+
 
 @app.get("/admin/list-users")
 def list_users(admin: UserOut = Depends(get_current_admin)):
