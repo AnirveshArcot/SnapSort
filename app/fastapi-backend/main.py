@@ -6,17 +6,14 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Any
-import uuid
 import os
 from datetime import datetime, timedelta
 import jwt
 import bcrypt
-from passlib.context import CryptContext
 from pymongo import MongoClient, ReturnDocument
 from bson import ObjectId
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from uuid import uuid4
 from tqdm import tqdm
 from ultralytics import YOLO
 import faiss
@@ -27,6 +24,10 @@ import json
 import uvicorn
 from secrets import token_urlsafe
 from fastapi import APIRouter
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 
@@ -60,14 +61,14 @@ app = FastAPI(lifespan=lifespan)
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://192.168.186.125:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # MongoDB Connection
-client = MongoClient("mongodb+srv://anirvesh:anirvesh@cluster0.tuw5ikl.mongodb.net")
+client = MongoClient(os.getenv("MONGODB_URI"))
 db = client["snap-sort"]
 users_collection = db["users"]
 feature_vector_collection = db["image_feature_vectors"]
@@ -76,7 +77,6 @@ settings_coll = db["settings"]
 
 
 #CDN Info
-CDN_BASE_URL = "https://your-cdn.com/"
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -84,8 +84,8 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 #Admin settings
-ADMIN_MAIL="harsha@arka.ai"
-ADMIN_PASSWORD="arkaai"
+ADMIN_MAIL=os.getenv("ADMIN_EMAIL")
+ADMIN_PASSWORD=os.getenv("ADMIN_PASSWORD")
 
 
 
@@ -93,9 +93,9 @@ ADMIN_PASSWORD="arkaai"
 
 
 # JWT settings
-SECRET_KEY = "your-secret-key"  # Use a secure key in production
+SECRET_KEY = os.getenv("SECRET_KEY") 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
 
 dimension = 4096
 model = YOLO("./model.pt")
@@ -689,28 +689,67 @@ async def event_upload_images(req: UploadImagesRequest, current_user: UserOut = 
     else:
         raise HTTPException(status_code=403, detail="Not allowed to upload images")
 
-@app.get("/event/get-images")
-async def get_images(current_user: UserOut = Depends(get_current_user)):
+@app.get("/event/get-images", response_model=List[dict])
+async def get_event_images(current_user: UserOut = Depends(get_current_user)):
+    event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
     images = []
+
+    if not os.path.exists(event_folder):
+        return images
+
     if current_user.role in ["admin", "editor"]:
-        main_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
-        if os.path.exists(main_folder):
-            for f in os.listdir(main_folder):
-                if f.lower().endswith("_preview.jpeg"):
-                    file_path = os.path.join(main_folder, f)
-                    try:
-                        with open(file_path, "rb") as image_file:
-                            encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                            images.append({
-                                "name": f,
-                                "folder": os.path.basename(main_folder),
-                                "base64": f"data:image/jpeg;base64,{encoded_string}"
-                            })
-                    except Exception as e:
-                        continue
-    else:
-        images = []
-    return {"images": images}
+        for f in os.listdir(event_folder):
+            if f.lower().endswith("_preview.jpeg"):
+                file_path = os.path.join(event_folder, f)
+                try:
+                    with open(file_path, "rb") as image_file:
+                        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                        images.append({
+                            "name": f,
+                            "base64": f"data:image/jpeg;base64,{encoded_string}"
+                        })
+                except Exception:
+                    continue
+        return images
+
+    if current_user.role == "photographer":
+        return []
+    print(current_user.id)
+
+    matches_path = os.path.join(event_folder, "matches.json")
+    if not os.path.exists(matches_path):
+        return images
+
+    try:
+        with open(matches_path, "r") as f:
+            matches_data = json.load(f)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Invalid matches.json format")
+
+    matched_files = matches_data.get("matches", {}).get(current_user.id, [])
+
+    for idx, filename in enumerate(matched_files):
+        base, ext = os.path.splitext(filename)
+        base = base.replace("_compressed", "")
+        preview_filename = f"{base}_preview.jpeg"
+        preview_path = os.path.join(event_folder, preview_filename)
+
+        if not os.path.exists(preview_path):
+            continue
+
+        try:
+            with open(preview_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                images.append({
+                            "name": preview_filename,
+                            "base64": f"data:image/jpeg;base64,{encoded_string}"
+                        })
+        except Exception:
+            continue
+
+    return images
+    
+    
 
 @app.get("/event/download")
 async def download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
@@ -719,13 +758,7 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
         base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
     else:
         base_name = os.path.splitext(filename)[0]
-    if current_user.role in ["admin", "photographer"]:
-        compressed_filename = f"{base_name}_compressed.jpeg"
-        file_path = os.path.join(folder, compressed_filename)
-        if os.path.exists(file_path):
-            return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
-        raise HTTPException(status_code=404, detail="File not found")
-    elif current_user.role == "editor":
+    if current_user.role == "editor":
         for ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]:
             original_filename = f"{base_name}_original{ext}"
             file_path = os.path.join(folder, original_filename)
@@ -733,7 +766,11 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
                 return FileResponse(path=file_path, filename=original_filename, media_type="application/octet-stream")
         raise HTTPException(status_code=404, detail="File not found")
     else:
-        raise HTTPException(status_code=403, detail="Not allowed to download images")
+        compressed_filename = f"{base_name}_compressed.jpeg"
+        file_path = os.path.join(folder, compressed_filename)
+        if os.path.exists(file_path):
+            return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
+        raise HTTPException(status_code=404, detail="File not found")
 
 
 class RoleUploadImagesRequest(BaseModel):

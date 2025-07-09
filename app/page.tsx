@@ -1,8 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { getSession, getImages } from "@/lib/api";
+import { getSession, getImages, downloadImageBlob } from "@/lib/api";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserNav } from "@/components/user-nav";
@@ -18,7 +17,6 @@ interface User {
   role: string;
 }
 
-// Adjust EventImage interface to match API response
 interface EventImage {
   name: string;
   base64: string;
@@ -31,18 +29,41 @@ export default function EventImagesPage() {
   const [images, setImages] = useState<EventImage[]>([]);
   const [loadingImages, setLoadingImages] = useState(true);
 
+  const handleDownload = async (filename: string) => {
+    try {
+      const blob = await downloadImageBlob(filename);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const modifiedName = filename.replace("_preview", "");
+      a.download = modifiedName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed:", err);
+      alert("Failed to download image.");
+    }
+  };
+
   useEffect(() => {
     (async () => {
       const sessionUser = await getSession();
       if (sessionUser) {
-        if(sessionUser.role === "admin" || sessionUser.role === "photographer" || sessionUser.role === "editor"){
+        // Redirect admins/editors/photographers to the admin page
+        if (
+          sessionUser.role === "admin" ||
+          sessionUser.role === "photographer" ||
+          sessionUser.role === "editor"
+        ) {
           router.push("/admin");
           return;
         }
         setUser(sessionUser);
         try {
           const res = await getImages();
-          setImages(res.images || []);
+          setImages(Array.isArray(res) ? res : res.images || []);
         } catch (err) {
           setImages([]);
         }
@@ -93,25 +114,33 @@ export default function EventImagesPage() {
           <p>Loading Images....</p>
         </div>
       ) : images.length === 0 ? (
-        <div className="text-center py-12 border rounded-lg">
+        <div className="text-center py-12 border rounded-lg mx-4 sm:mx-10">
           <p className="text-muted-foreground">
             No images have been uploaded to this event yet.
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-3 sm:px-10">
-          {images.map((image, idx) => (
-            <div key={image.name + idx} className="border rounded-lg overflow-hidden shadow hover:shadow-md transition">
-              <div className="relative aspect-square">
-                <Image
-                  src={image.base64}
-                  alt={image.name}
-                  fill
-                  className="object-cover"
+        <div className="space-y-2 px-3 sm:px-10">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            {images.map((img) => (
+              <div
+                key={img.name}
+                className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
+              >
+                <img
+                  src={img.base64}
+                  alt={img.name}
+                  className="w-full h-48 object-cover"
                 />
+                <div className="p-2 flex justify-between items-center text-sm">
+                  <span className="truncate" title={img.name}>{img.name}</span>
+                  <Button onClick={() => handleDownload(img.name)}>
+                    Download
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>

@@ -80,7 +80,7 @@ export default function AdminPage() {
   const fetchImages = async () => {
     try {
       const res = await getImages();
-      setImageList(res.images || []);
+      setImageList(Array.isArray(res) ? res : res.images || []);
     } catch (err) {
       console.error("Failed to fetch images:", err);
     }
