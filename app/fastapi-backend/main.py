@@ -99,8 +99,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
 dimension = 4096
 model = YOLO("./model.pt")
+
+
+CDN_STORAGE_PATH = "./cdn_storage/"
+os.makedirs(CDN_STORAGE_PATH, exist_ok=True)
 FAISS_INDEX_DIR = "./faiss_indices"
 os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
+
+
+
 SIMILARITY_THRESHOLD=0.5
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -191,8 +198,7 @@ def save_faiss_index(event_id: str, dimension: int = None):
     print(f"Saved FAISS index for event {event_id} to '{index_path}'")
     
 
-CDN_STORAGE_PATH = "./cdn_storage/"
-os.makedirs(CDN_STORAGE_PATH, exist_ok=True)
+
 
 def decode_base64_image(base64_string):
     base64_data = re.sub(r"^data:image/\w+;base64,", "", base64_string)

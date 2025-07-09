@@ -31,10 +31,9 @@ next-env.d.ts
 /app/fastapi-backend/__pycache__/
 /app/fastapi-backend/**/*.py[cod]
 /app/fastapi-backend/backend/
-/app/fastapi-backend/cdn_storage/
-/app/fastapi-backend/faiss_indices/
-/app/fastapi-backend/image_test/
-/app/fastapi-backend/images_repo/
-/app/fastapi-backend/users_test/
+/app/fastapi-backend/cdn_storage
+/app/fastapi-backend/faiss_indices
+/app/fastapi-backend/images_test
+/app/fastapi-backend/images-repo
 
 
