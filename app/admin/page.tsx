@@ -156,6 +156,26 @@ export default function AdminPage() {
 
   // --- Create New Event Handler (Admin Only) ---
   const handleCreateEvent = async () => {
+    // First warning: Basic confirmation
+    if (!confirm("Are you sure you want to create a new event?")) {
+      return;
+    }
+
+    // Second warning: Data loss warning
+    if (!confirm("⚠️ WARNING: Creating a new event may affect existing data and system performance. Continue?")) {
+      return;
+    }
+
+    // Third warning: Resource usage warning
+    if (!confirm("⚠️ SYSTEM WARNING: This action will allocate system resources and may take several minutes. Proceed?")) {
+      return;
+    }
+
+    // Fourth warning: Final confirmation
+    if (!confirm("⚠️ FINAL CONFIRMATION: You are about to create a new event. This action cannot be easily undone. Click OK to proceed.")) {
+      return;
+    }
+
     setCreatingEvent(true);
     setCreatedEvent(null);
     try {
