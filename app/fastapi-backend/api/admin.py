@@ -8,6 +8,7 @@ from secrets import token_urlsafe
 import bcrypt
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
+from services.image_processing import clear_event_cache
 
 router = APIRouter()
 
@@ -76,4 +77,5 @@ def create_event(admin: UserOut = Depends(get_current_admin)):
     from bson import ObjectId
     new_id = str(ObjectId())
     settings_coll.update_one({"_id": "current_event"}, {"$set": {"event_id": new_id}}, upsert=True)
+    clear_event_cache()
     return {"event_id": new_id}

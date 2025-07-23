@@ -1,12 +1,13 @@
 # api/event.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
-from core.config import CDN_STORAGE_PATH
-from services.image_processing import decode_base64_image
+from core.config import ALLOWED_EXTENSIONS, CACHE_DIR, CDN_STORAGE_PATH
+from services.image_processing import cache_compressed_image, decode_base64_image, get_cached_compressed_image
 import os, base64, json
 from fastapi.responses import FileResponse
 from typing import List
 from api.auth import get_me as get_current_user
+import cv2
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
     else:
         base_name = os.path.splitext(filename)[0]
     if current_user.role == "editor":
-        for ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]:
+        for ext in ALLOWED_EXTENSIONS:
             original_filename = f"{base_name}_original{ext}"
             file_path = os.path.join(folder, original_filename)
             if os.path.exists(file_path):
@@ -47,23 +48,16 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
         raise HTTPException(status_code=404, detail="File not found")
     else:
         compressed_filename = f"{base_name}_compressed.jpeg"
+        cache_path = os.path.join(CACHE_DIR, compressed_filename)
+        cached_img = get_cached_compressed_image(compressed_filename)
+        if cached_img is not None and os.path.exists(cache_path):
+            return FileResponse(path=cache_path, filename=compressed_filename, media_type="application/octet-stream")
         file_path = os.path.join(folder, compressed_filename)
         if os.path.exists(file_path):
+            img = cv2.imread(file_path)
+            cache_compressed_image(compressed_filename, img)
             return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
         raise HTTPException(status_code=404, detail="File not found")
-
-@router.get("/role-download")
-def role_download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
-    if current_user.role != "editor":
-        raise HTTPException(status_code=403, detail="Not allowed")
-    folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
-    base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
-    for ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]:
-        original_filename = f"{base_name}_original{ext}"
-        file_path = os.path.join(folder, original_filename)
-        if os.path.exists(file_path):
-            return FileResponse(path=file_path, filename=original_filename, media_type="application/octet-stream")
-    raise HTTPException(status_code=404, detail="File not found")
 
 @router.get("/get-images", response_model=List[dict])
 async def get_images(current_user: UserOut = Depends(get_current_user)):
