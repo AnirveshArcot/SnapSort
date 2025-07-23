@@ -1,5 +1,4 @@
 # core/config.py
-
 import os
 from dotenv import load_dotenv
 from services.faiss_index import load_faiss_index
@@ -16,9 +15,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 ALGORITHM = "HS256"
 
 CDN_STORAGE_PATH = "./cdn_storage/"
-FAISS_INDEX_DIR = "./faiss_indices"
+FAISS_INDEX_DIR = "./faiss_indices/"
 CACHE_DIR = "./image_cache/"
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
+
+SIMILARITY_THRESHOLD=0.5
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.makedirs(CDN_STORAGE_PATH, exist_ok=True)

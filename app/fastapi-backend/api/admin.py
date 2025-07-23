@@ -1,15 +1,45 @@
 # api/admin.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from db.models import CreateUserRequest, DeleteUserRequest
 from core.config import users_collection, user_id_map, settings_coll, CURRENT_EVENT_ID
-from core.security import create_access_token
+from auth import get_current_user
+from services.face_matching import run_face_matching
 from secrets import token_urlsafe
 import bcrypt
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 
 router = APIRouter()
 
+class UserOut(BaseModel):
+    id: str
+    name: str
+    email: str
+    role: str
+
+
+def get_current_admin(current_user: UserOut = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+@router.post("/match_faces")
+def match_faces(background_tasks: BackgroundTasks, admin_user: UserOut = Depends(get_current_admin)):
+    current_settings = settings_coll.find_one({"_id": "current_event"})
+    current_status = current_settings.get("status") if current_settings else "free"
+    if current_status == "processing":
+        raise HTTPException(status_code=409, detail="Matching is already in progress.")
+    settings_coll.update_one(
+        {"_id": "current_event"},
+        {"$set": {"status": "processing"}},
+        upsert=True
+    )
+    background_tasks.add_task(run_face_matching)
+    return {"message": "Face matching has started in the background.", "status": "processing"}
+
+# Add Depends(get_current_admin) to all admin endpoints
 @router.post("/create-user")
-def create_user(req: CreateUserRequest):
+def create_user(req: CreateUserRequest, admin: UserOut = Depends(get_current_admin)):
     if req.role not in ["photographer", "editor"]:
         raise HTTPException(status_code=400, detail="Invalid role")
     email = f"{req.name}@arka.ai"
@@ -29,12 +59,12 @@ def create_user(req: CreateUserRequest):
     return {"email": email, "password": password, "role": req.role}
 
 @router.get("/list-users")
-def list_users():
+def list_users(admin: UserOut = Depends(get_current_admin)):
     users = list(users_collection.find({"role": {"$in": ["photographer", "editor"]}}))
     return [{"name": u["name"], "email": u["email"], "role": u["role"]} for u in users]
 
 @router.post("/delete-user")
-def delete_user(req: DeleteUserRequest):
+def delete_user(req: DeleteUserRequest, admin: UserOut = Depends(get_current_admin)):
     user = users_collection.find_one({"email": req.email})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -42,7 +72,7 @@ def delete_user(req: DeleteUserRequest):
     return {"success": True}
 
 @router.post("/create-event")
-def create_event():
+def create_event(admin: UserOut = Depends(get_current_admin)):
     from bson import ObjectId
     new_id = str(ObjectId())
     settings_coll.update_one({"_id": "current_event"}, {"$set": {"event_id": new_id}}, upsert=True)

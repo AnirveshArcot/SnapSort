@@ -1,26 +1,152 @@
 # services/face_matching.py
+from fastapi import HTTPException
 from services.image_processing import fetch_image_from_cdn
 from tqdm import tqdm
 import os
 import json
-from core.config import settings_coll, feature_vector_collection, user_id_map, CDN_STORAGE_PATH, CURRENT_EVENT_ID
+from core.config import settings_coll, feature_vector_collection, user_id_map, CDN_STORAGE_PATH, CURRENT_EVENT_ID , ALLOWED_EXTENSIONS , SIMILARITY_THRESHOLD, faiss_index, dimension
+import numpy as np
+import faiss
+from deepface.DeepFace import represent
+from ultralytics import YOLO
 
-def run_face_matching(faiss_index):
-    matches = {}
-    image_files = os.listdir(os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID))
-    compressed_files = [f for f in image_files if f.endswith("_compressed.jpeg")]
-    all_records = list(feature_vector_collection.find({"event_id": CURRENT_EVENT_ID}))
-    int_id_to_obj = {doc["int_id"]: doc["_id"] for doc in user_id_map.find({})}
+model = YOLO("./model.pt")
 
-    for file_name in tqdm(compressed_files, desc="Matching Faces"):
-        try:
-            image = fetch_image_from_cdn(f"{CURRENT_EVENT_ID}/{file_name}")
-            # call your vector matching logic here
-            pass
-        except Exception as e:
-            print(f"Error processing {file_name}: {e}")
+def extract_features_func(face_image):
+    result = represent(face_image, model_name="VGG-Face", enforce_detection=False, align=True)
+    return result[0]["embedding"]
 
-    with open(os.path.join(CDN_STORAGE_PATH, CURRENT_EVENT_ID, "matches.json"), "w") as f:
-        json.dump({"matches": matches}, f, indent=4)
 
-    settings_coll.update_one({"_id": "current_event"}, {"$set": {"status": "free"}}, upsert=True)
+def localize_faces_func(image):
+    results = model.predict(source=image, conf=0.25,verbose=False)
+    face_boxes = []
+    for box in results[0].boxes.xyxy:
+        x1, y1, x2, y2 = map(int, box)
+        face_boxes.append((x1, y1, x2, y2))
+    return face_boxes
+
+
+def process_image(file, feature_records, int_id_map, event_id, similarity_threshold):
+    try:
+        image = file["image"]
+        file_key = file["file_key"]
+        bounding_boxes = localize_faces_func(image)
+        if not bounding_boxes:
+            return {}
+
+        vecs = []
+        for (x1, y1, x2, y2) in bounding_boxes:
+            face_img = image[y1:y2, x1:x2]
+            feat = extract_features_func(face_img)
+            vecs.append(np.array(feat, dtype='float32'))
+        batch = np.stack(vecs, axis=0)
+        faiss.normalize_L2(batch)
+        similarities, indices = faiss_index.search(batch, 1)
+        matches = {}
+        for i, box in enumerate(bounding_boxes):
+            best_score = float(similarities[i, 0])
+            best_int_id = int(indices[i, 0])
+
+            if best_score >= similarity_threshold:
+                try:
+                    obj_id = int_id_map[best_int_id]
+                except KeyError:
+                    continue
+
+                pid = str(obj_id)
+                matches.setdefault(pid, []).append({
+                    "file_key": file_key,
+                    "bounding_box": box,
+                    "similarity": best_score
+                })       
+        return matches
+    except Exception as e:
+        print(f"Error processing image : {e}")
+        return None
+    
+def upload_to_cdn(file_name, json_data):
+    file_path = os.path.join(CDN_STORAGE_PATH, file_name)
+
+    try:
+        with open(file_path, "w") as f:
+            json.dump(json_data, f, indent=4)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to save JSON file: {str(e)}")
+
+    return {"url": f"local://{file_path}"}  # Simulated URL
+
+
+def list_event_files(event_id: str):
+    event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
+    if not os.path.exists(event_folder) or not os.path.isdir(event_folder):
+        raise HTTPException(status_code=400, detail=f"Event folder not found: {event_id}")
+
+    files = [
+        fname for fname in os.listdir(event_folder)
+        if os.path.isfile(os.path.join(event_folder, fname))
+           and fname.lower().endswith(ALLOWED_EXTENSIONS)
+    ]
+
+    return {"event_id": event_id, "files": files}
+
+def run_face_matching():
+    try:
+        image_files = list_event_files(CURRENT_EVENT_ID)
+        compressed_files = [
+            file_name for file_name in image_files["files"]
+            if os.path.splitext(file_name)[0].endswith("_compressed")
+        ]
+    
+        matches = {}
+
+        all_records = list(feature_vector_collection.find({"event_id": CURRENT_EVENT_ID}))
+        if not all_records:
+            print("No feature vectors found.")
+            settings_coll.update_one(
+            {"_id": "current_event"},
+            {"$set": {"status": "error", "error_detail": str(e)}},
+            upsert=True
+        )
+            return
+        id_map_list = list(user_id_map.find({}, {"int_id": 1, "_id": 1}))
+        int_id_to_obj = {record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record}
+        for file_name in tqdm(compressed_files, desc="Matching Faces"):
+            base, ext = os.path.splitext(file_name)
+            if not base.endswith("_compressed"):
+                continue
+
+            try:
+                image_path = f"{CURRENT_EVENT_ID}/{file_name}"
+                image = fetch_image_from_cdn(image_path)
+
+                file = {"image": image, "file_key": file_name}
+                result = process_image(file, all_records, int_id_to_obj, CURRENT_EVENT_ID, SIMILARITY_THRESHOLD)
+                
+                if result:
+                    for person_id, file_matches in result.items():
+                        if person_id not in matches:
+                            matches[person_id] = []
+
+                        for match in file_matches:
+                            fk = match['file_key']
+                            if fk not in matches[person_id]:
+                                matches[person_id].append(fk)
+
+            except Exception as e:
+                print(f"Error processing {file_name}: {e}")
+
+        matches_json = {"matches": matches}
+        matches_json_url = upload_to_cdn(f"{CURRENT_EVENT_ID}/matches.json", matches_json)
+        settings_coll.update_one(
+            {"_id": "current_event"},
+            {"$set": {"status": "free"}},
+            upsert=True
+        )
+
+    except Exception as e:
+        settings_coll.update_one(
+            {"_id": "current_event"},
+            {"$set": {"status": "error", "error_detail": str(e)}},
+            upsert=True
+        )
+        print(f"Error in background task: {e}")

@@ -1,33 +1,125 @@
 # api/event.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
 from core.config import CDN_STORAGE_PATH
 from services.image_processing import decode_base64_image
-import os, base64
+import os, base64, json
+from fastapi.responses import FileResponse
+from typing import List
+from api.auth import get_me as get_current_user
 
 router = APIRouter()
 
 @router.post("/upload-images", response_model=UploadImagesResponse)
-def upload_images(req: UploadImagesRequest):
+async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depends(get_current_user)):
+    if current_user.role not in ["photographer", "editor"]:
+        raise HTTPException(status_code=403, detail="Not allowed to upload images")
+    if current_user.role == "editor":
+        event_folder = os.path.join(CDN_STORAGE_PATH, f"{current_user.joined_event}_edited")
+    else:
+        event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    os.makedirs(event_folder, exist_ok=True)
     uploaded = []
     for img in req.images:
         header, _, payload = img.base64.partition(",")
         image_data = base64.b64decode(payload or img.base64)
-        file_path = os.path.join(CDN_STORAGE_PATH, img.filename)
-        with open(file_path, "wb") as f:
-            f.write(image_data)
-        uploaded.append(img.filename)
+        base_name, ext = os.path.splitext(img.filename)
+        original_filename = f"{base_name}_original{ext}"
+        original_path = os.path.join(event_folder, original_filename)
+        with open(original_path, "wb") as fout:
+            fout.write(image_data)
+        uploaded.append(original_filename)
     return UploadImagesResponse(uploaded=uploaded)
 
 @router.get("/download")
-def download_image(filename: str):
-    path = os.path.join(CDN_STORAGE_PATH, filename)
-    if not os.path.exists(path):
+async def download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
+    folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    if "_preview" in filename:
+        base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
+    else:
+        base_name = os.path.splitext(filename)[0]
+    if current_user.role == "editor":
+        for ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]:
+            original_filename = f"{base_name}_original{ext}"
+            file_path = os.path.join(folder, original_filename)
+            if os.path.exists(file_path):
+                return FileResponse(path=file_path, filename=original_filename, media_type="application/octet-stream")
         raise HTTPException(status_code=404, detail="File not found")
-    from fastapi.responses import FileResponse
-    return FileResponse(path, filename=filename)
+    else:
+        compressed_filename = f"{base_name}_compressed.jpeg"
+        file_path = os.path.join(folder, compressed_filename)
+        if os.path.exists(file_path):
+            return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
+        raise HTTPException(status_code=404, detail="File not found")
 
-@router.get("/get-images")
-def get_images():
-    files = os.listdir(CDN_STORAGE_PATH)
-    return [{"name": f} for f in files if f.endswith(".jpeg") or f.endswith(".jpg")]
+@router.get("/role-download")
+def role_download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
+    if current_user.role != "editor":
+        raise HTTPException(status_code=403, detail="Not allowed")
+    folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
+    for ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]:
+        original_filename = f"{base_name}_original{ext}"
+        file_path = os.path.join(folder, original_filename)
+        if os.path.exists(file_path):
+            return FileResponse(path=file_path, filename=original_filename, media_type="application/octet-stream")
+    raise HTTPException(status_code=404, detail="File not found")
+
+@router.get("/get-images", response_model=List[dict])
+async def get_images(current_user: UserOut = Depends(get_current_user)):
+    event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    images = []
+
+    if not os.path.exists(event_folder):
+        return images
+
+    if current_user.role in ["admin", "editor"]:
+        for f in os.listdir(event_folder):
+            if f.lower().endswith("_preview.jpeg"):
+                file_path = os.path.join(event_folder, f)
+                try:
+                    with open(file_path, "rb") as image_file:
+                        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                        images.append({
+                            "name": f,
+                            "base64": f"data:image/jpeg;base64,{encoded_string}"
+                        })
+                except Exception:
+                    continue
+        return images
+
+    if current_user.role == "photographer":
+        return []
+
+    matches_path = os.path.join(event_folder, "matches.json")
+    if not os.path.exists(matches_path):
+        return images
+
+    try:
+        with open(matches_path, "r") as f:
+            matches_data = json.load(f)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Invalid matches.json format")
+
+    matched_files = matches_data.get("matches", {}).get(current_user.id, [])
+
+    for idx, filename in enumerate(matched_files):
+        base, ext = os.path.splitext(filename)
+        base = base.replace("_compressed", "")
+        preview_filename = f"{base}_preview.jpeg"
+        preview_path = os.path.join(event_folder, preview_filename)
+
+        if not os.path.exists(preview_path):
+            continue
+
+        try:
+            with open(preview_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                images.append({
+                    "name": preview_filename,
+                    "base64": f"data:image/jpeg;base64,{encoded_string}"
+                })
+        except Exception:
+            continue
+
+    return images

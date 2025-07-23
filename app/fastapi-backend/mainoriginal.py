@@ -227,7 +227,6 @@ def fetch_image_from_cdn(image_name: str):
 
 
 def upload_to_cdn(file_name, json_data):
-    """Simulates uploading a JSON file to the local CDN folder."""
     file_path = os.path.join(CDN_STORAGE_PATH, file_name)
 
     try:
