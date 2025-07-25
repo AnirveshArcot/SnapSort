@@ -1,8 +1,8 @@
 # api/event.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
-from core.config import ALLOWED_EXTENSIONS, CACHE_DIR, CDN_STORAGE_PATH
-from services.image_processing import cache_compressed_image, decode_base64_image, get_cached_compressed_image
+from core.config import ALLOWED_EXTENSIONS, CDN_STORAGE_PATH
+from services.image_processing import decode_base64_image, get_cached_compressed_image, cache_compressed_image, CACHE_DIR
 import os, base64, json
 from fastapi.responses import FileResponse
 from typing import List
