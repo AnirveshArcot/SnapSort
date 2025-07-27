@@ -157,7 +157,7 @@ def logout():
     return resp
 
 
-@router.get("/auth/me", response_model=UserOut)
+@router.get("/me", response_model=UserOut)
 async def get_me(current_user: UserOut = Depends(get_current_user)):
     return UserOut(
         id=current_user.id,
