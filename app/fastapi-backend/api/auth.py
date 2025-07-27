@@ -64,7 +64,7 @@ async def get_current_user(
         raise credentials_exception
 
     if role == "admin" and user_id == "admin":
-        return User(
+        return UserOut(
             id="NEO",
             name="ADMIN",
             email=ADMIN_MAIL,
@@ -83,7 +83,7 @@ async def get_current_user(
     if not user:
         raise credentials_exception
 
-    return User(
+    return UserOut(
         id=str(user["_id"]),
         name=user["name"],
         email=user["email"],
