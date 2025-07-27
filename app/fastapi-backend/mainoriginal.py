@@ -565,7 +565,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             value=access_token,
             httponly=True,
             samesite="lax",
-            secure=False,
+            secure=True,
             path="/"
         )
         return response
@@ -579,7 +579,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         value=access_token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=True,
         path="/"
     )
     return response

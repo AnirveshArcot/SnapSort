@@ -88,14 +88,28 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if username == ADMIN_MAIL and password == ADMIN_PASSWORD:
         token = create_access_token({"sub": "admin", "role": "admin"})
         resp = JSONResponse({"access_token": token, "token_type": "bearer"})
-        resp.set_cookie("auth_token", token, httponly=True)
+        resp.set_cookie(
+            key="auth_token",
+            value=token,
+            httponly=True,
+            samesite="lax",
+            secure=True,
+            path="/"
+        )
         return resp
     user = users_collection.find_one({"email": username})
     if not user or not bcrypt.checkpw(password.encode(), user["password"].encode()):
         raise HTTPException(status_code=401, detail="Incorrect credentials")
     token = create_access_token({"sub": str(user["_id"]), "role": user["role"]})
     resp = JSONResponse({"access_token": token, "token_type": "bearer"})
-    resp.set_cookie("auth_token", token, httponly=True)
+    resp.set_cookie(
+            key="auth_token",
+            value=token,
+            httponly=True,
+            samesite="lax",
+            secure=True,
+            path="/"
+        )
     return resp
 
 @router.post("/logout")

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from db.models import CreateUserRequest, DeleteUserRequest
 from core.config import users_collection, user_id_map, settings_coll, CURRENT_EVENT_ID
+from services.face_matching import run_face_matching
 from core.security import create_access_token
 from secrets import token_urlsafe
 import bcrypt
