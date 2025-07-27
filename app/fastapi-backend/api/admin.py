@@ -65,7 +65,15 @@ def create_user(req: CreateUserRequest, admin: UserOut = Depends(get_current_adm
 @router.get("/list-users")
 def list_users(admin: UserOut = Depends(get_current_admin)):
     users = list(config.users_collection.find({"role": {"$in": ["photographer", "editor"]}}))
-    return [{"name": u["name"], "email": u["email"], "role": u["role"]} for u in users]
+    result = []
+    for user in users:
+        result.append({
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "role": user.get("role"),
+        })
+    return {"users": result}
+
 
 @router.post("/delete-user")
 def delete_user(req: DeleteUserRequest, admin: UserOut = Depends(get_current_admin)):
