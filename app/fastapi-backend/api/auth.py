@@ -183,7 +183,7 @@ async def get_me(current_user: UserOut = Depends(get_current_user)):
         name=current_user.name,
         email=current_user.email,
         image=current_user.image,
-        joined_event=CURRENT_EVENT_ID,
+        joined_event=current_user.joined_event,
         role=current_user.role,
     )
     
