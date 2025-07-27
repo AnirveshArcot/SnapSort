@@ -69,7 +69,7 @@ async def get_current_user(
             name="ADMIN",
             email=ADMIN_MAIL,
             image="",
-            joined_event=CURRENT_EVENT_ID,
+            joined_event="noeventbecauseadmin",
             role="admin"
         )
 
