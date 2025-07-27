@@ -44,6 +44,7 @@ async def lifespan(app):
     doc = settings_coll.find_one({"_id": "current_event"})
     if doc:
         CURRENT_EVENT_ID = str(doc["event_id"])
+        print(CURRENT_EVENT_ID)
     else:
         settings_coll.insert_one({"_id": "current_event", "event_id": CURRENT_EVENT_ID})
 
