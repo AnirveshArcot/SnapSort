@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import lifespan
-from api import auth, admin, event
+from api import auth, admin, event, status
 
 app = FastAPI(lifespan=lifespan)
 
@@ -17,6 +17,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 app.include_router(event.router, prefix="/event", tags=["Event"])
+app.include_router(status.router, prefix="/status", tags=["Status"])
+
 
 @app.get("/")
 def root():

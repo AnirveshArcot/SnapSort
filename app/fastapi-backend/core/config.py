@@ -1,4 +1,7 @@
 import os
+import subprocess
+import threading
+import time
 from dotenv import load_dotenv
 from services.faiss_index import load_faiss_index, save_faiss_index
 from db.mongo import users_collection, feature_vector_collection, user_id_map, settings_coll
@@ -29,6 +32,34 @@ _current_event_id = None
 _faiss_index = None
 
 
+def is_mounted(path: str) -> bool:
+    return os.path.ismount(path)
+
+
+def mount_ftp():
+    try:
+        print("Attempting to mount FTP...")
+        subprocess.run(
+            ["sudo", "curlftpfs", "ftpuser:arka6969@122.166.210.200", CDN_STORAGE_PATH, "-o", "allow_other"],
+            check=True
+        )
+        print("FTP mounted successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"Mount attempt failed: {e}")
+
+
+def auto_mount_loop():
+    while True:
+        if not is_mounted(CDN_STORAGE_PATH):
+            mount_ftp()
+        time.sleep(10)
+
+
+def start_mount_thread():
+    thread = threading.Thread(target=auto_mount_loop, daemon=True)
+    thread.start()
+
+
 def get_current_event_id() -> str | None:
     global _current_event_id
     if _current_event_id is not None:
@@ -37,6 +68,7 @@ def get_current_event_id() -> str | None:
     if doc:
         _current_event_id = str(doc["event_id"])
     return _current_event_id
+
 
 def set_current_event_id(event_id: str):
     global _current_event_id
@@ -52,6 +84,7 @@ def get_faiss_index():
             _faiss_index = load_faiss_index(current_event_id, dimension)
     return _faiss_index
 
+
 def set_faiss_index(index):
     global _faiss_index
     _faiss_index = index
@@ -60,10 +93,12 @@ def set_faiss_index(index):
         save_faiss_index(index, current_event_id)
 
 
-
 async def lifespan(app):
     if get_current_event_id() is None:
         settings_coll.update_one({"_id": "current_event"}, {"$set": {"event_id": "default_event"}}, upsert=True)
     get_faiss_index()
     settings_coll.update_one({"_id": "current_event"}, {"$set": {"status": "free"}}, upsert=True)
+
+    # start_mount_thread()
+
     yield
