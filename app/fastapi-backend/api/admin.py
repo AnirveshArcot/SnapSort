@@ -1,7 +1,9 @@
 # api/admin.py
+import os
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from db.models import CreateUserRequest, DeleteUserRequest
-from core.config import users_collection, user_id_map, settings_coll, CURRENT_EVENT_ID
+import core.config as config
 from services.face_matching import run_face_matching
 from core.security import create_access_token
 from secrets import token_urlsafe
@@ -20,18 +22,18 @@ class UserOut(BaseModel):
     role: str
 
 
-def get_current_admin(current_user: UserOut = Depends(get_current_user)):
+async def get_current_admin(current_user: UserOut = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
 @router.post("/match_faces")
 def match_faces(background_tasks: BackgroundTasks, admin_user: UserOut = Depends(get_current_admin)):
-    current_settings = settings_coll.find_one({"_id": "current_event"})
+    current_settings = config.settings_coll.find_one({"_id": "current_event"})
     current_status = current_settings.get("status") if current_settings else "free"
     if current_status == "processing":
         raise HTTPException(status_code=409, detail="Matching is already in progress.")
-    settings_coll.update_one(
+    config.settings_coll.update_one(
         {"_id": "current_event"},
         {"$set": {"status": "processing"}},
         upsert=True
@@ -52,31 +54,51 @@ def create_user(req: CreateUserRequest, admin: UserOut = Depends(get_current_adm
         "email": email,
         "password": hashed_password.decode('utf-8'),
         "role": req.role,
-        "joined_event": CURRENT_EVENT_ID,
+        "joined_event": config.CURRENT_EVENT_ID,
         "image": ""
     }
-    if users_collection.find_one({"email": email}):
+    if config.users_collection.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="User already exists")
-    users_collection.insert_one(user_data)
+    config.users_collection.insert_one(user_data)
     return {"email": email, "password": password, "role": req.role}
 
 @router.get("/list-users")
 def list_users(admin: UserOut = Depends(get_current_admin)):
-    users = list(users_collection.find({"role": {"$in": ["photographer", "editor"]}}))
+    users = list(config.users_collection.find({"role": {"$in": ["photographer", "editor"]}}))
     return [{"name": u["name"], "email": u["email"], "role": u["role"]} for u in users]
 
 @router.post("/delete-user")
 def delete_user(req: DeleteUserRequest, admin: UserOut = Depends(get_current_admin)):
-    user = users_collection.find_one({"email": req.email})
+    user = config.users_collection.find_one({"email": req.email})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    users_collection.delete_one({"_id": user["_id"]})
+    config.users_collection.delete_one({"_id": user["_id"]})
     return {"success": True}
 
 @router.post("/create-event")
 def create_event(admin: UserOut = Depends(get_current_admin)):
-    from bson import ObjectId
     new_id = str(ObjectId())
-    settings_coll.update_one({"_id": "current_event"}, {"$set": {"event_id": new_id}}, upsert=True)
+
+    # Update event ID in MongoDB
+    config.settings_coll.update_one(
+        {"_id": "current_event"},
+        {"$set": {"event_id": new_id}},
+        upsert=True
+    )
+
+    # Update in-memory event ID
+    config.CURRENT_EVENT_ID = new_id
+
+    # Clear cache
     clear_event_cache()
+
+    # Clear previous data
+    config.users_collection.delete_many({})
+    config.feature_vector_collection.delete_many({})
+    config.user_id_map.delete_many({})
+
+    # Create event folder in CDN
+    event_folder_path = os.path.join(config.CDN_STORAGE_PATH, new_id)
+    os.makedirs(event_folder_path, exist_ok=True)
+
     return {"event_id": new_id}
