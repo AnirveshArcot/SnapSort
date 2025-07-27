@@ -4,9 +4,18 @@ from services.image_processing import fetch_image_from_cdn
 from tqdm import tqdm
 import os
 import json
-from core.config import settings_coll, feature_vector_collection, user_id_map, CDN_STORAGE_PATH, CURRENT_EVENT_ID , ALLOWED_EXTENSIONS , SIMILARITY_THRESHOLD, faiss_index, dimension
 import numpy as np
 import faiss
+from core.config import (
+    settings_coll,
+    feature_vector_collection,
+    user_id_map,
+    CDN_STORAGE_PATH,
+    ALLOWED_EXTENSIONS,
+    SIMILARITY_THRESHOLD,
+    get_current_event_id,
+    get_faiss_index
+)
 from deepface.DeepFace import represent
 from ultralytics import YOLO
 
@@ -16,17 +25,15 @@ def extract_features_func(face_image):
     result = represent(face_image, model_name="VGG-Face", enforce_detection=False, align=True)
     return result[0]["embedding"]
 
-
 def localize_faces_func(image):
-    results = model.predict(source=image, conf=0.25,verbose=False)
+    results = model.predict(source=image, conf=0.25, verbose=False)
     face_boxes = []
     for box in results[0].boxes.xyxy:
         x1, y1, x2, y2 = map(int, box)
         face_boxes.append((x1, y1, x2, y2))
     return face_boxes
 
-
-def process_image(file, feature_records, int_id_map, event_id, similarity_threshold):
+def process_image(file, feature_records, int_id_map, faiss_index, similarity_threshold):
     try:
         image = file["image"]
         file_key = file["file_key"]
@@ -39,9 +46,11 @@ def process_image(file, feature_records, int_id_map, event_id, similarity_thresh
             face_img = image[y1:y2, x1:x2]
             feat = extract_features_func(face_img)
             vecs.append(np.array(feat, dtype='float32'))
+
         batch = np.stack(vecs, axis=0)
         faiss.normalize_L2(batch)
         similarities, indices = faiss_index.search(batch, 1)
+
         matches = {}
         for i, box in enumerate(bounding_boxes):
             best_score = float(similarities[i, 0])
@@ -58,12 +67,12 @@ def process_image(file, feature_records, int_id_map, event_id, similarity_thresh
                     "file_key": file_key,
                     "bounding_box": box,
                     "similarity": best_score
-                })       
+                })
         return matches
     except Exception as e:
         print(f"Error processing image : {e}")
         return None
-    
+
 def upload_to_cdn(file_name, json_data):
     file_path = os.path.join(CDN_STORAGE_PATH, file_name)
 
@@ -75,7 +84,6 @@ def upload_to_cdn(file_name, json_data):
 
     return {"url": f"local://{file_path}"}  # Simulated URL
 
-
 def list_event_files(event_id: str):
     event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
     if not os.path.exists(event_folder) or not os.path.isdir(event_folder):
@@ -84,44 +92,53 @@ def list_event_files(event_id: str):
     files = [
         fname for fname in os.listdir(event_folder)
         if os.path.isfile(os.path.join(event_folder, fname))
-           and fname.lower().endswith(ALLOWED_EXTENSIONS)
+        and fname.lower().endswith(ALLOWED_EXTENSIONS)
     ]
-
     return {"event_id": event_id, "files": files}
 
 def run_face_matching():
     try:
-        image_files = list_event_files(CURRENT_EVENT_ID)
+        current_event = get_current_event_id()
+        if not current_event:
+            raise ValueError("No current event ID set")
+
+        faiss_index = get_faiss_index()
+        if faiss_index is None:
+            raise ValueError("FAISS index not loaded for current event")
+
+        image_files = list_event_files(current_event)
         compressed_files = [
             file_name for file_name in image_files["files"]
             if os.path.splitext(file_name)[0].endswith("_compressed")
         ]
-    
+
         matches = {}
 
-        all_records = list(feature_vector_collection.find({"event_id": CURRENT_EVENT_ID}))
+        all_records = list(feature_vector_collection.find({"event_id": current_event}))
         if not all_records:
             print("No feature vectors found.")
             settings_coll.update_one(
-            {"_id": "current_event"},
-            {"$set": {"status": "error", "error_detail": str(e)}},
-            upsert=True
-        )
+                {"_id": "current_event"},
+                {"$set": {"status": "error", "error_detail": "No feature vectors found."}},
+                upsert=True
+            )
             return
+
         id_map_list = list(user_id_map.find({}, {"int_id": 1, "_id": 1}))
         int_id_to_obj = {record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record}
+
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             base, ext = os.path.splitext(file_name)
             if not base.endswith("_compressed"):
                 continue
 
             try:
-                image_path = f"{CURRENT_EVENT_ID}/{file_name}"
+                image_path = f"{current_event}/{file_name}"
                 image = fetch_image_from_cdn(image_path)
 
                 file = {"image": image, "file_key": file_name}
-                result = process_image(file, all_records, int_id_to_obj, CURRENT_EVENT_ID, SIMILARITY_THRESHOLD)
-                
+                result = process_image(file, all_records, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD)
+
                 if result:
                     for person_id, file_matches in result.items():
                         if person_id not in matches:
@@ -136,7 +153,8 @@ def run_face_matching():
                 print(f"Error processing {file_name}: {e}")
 
         matches_json = {"matches": matches}
-        matches_json_url = upload_to_cdn(f"{CURRENT_EVENT_ID}/matches.json", matches_json)
+        upload_to_cdn(f"{current_event}/matches.json", matches_json)
+
         settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "free"}},

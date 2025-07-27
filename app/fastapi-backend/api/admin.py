@@ -1,4 +1,3 @@
-# api/admin.py
 import os
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -27,6 +26,7 @@ async def get_current_admin(current_user: UserOut = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
+
 @router.post("/match_faces")
 def match_faces(background_tasks: BackgroundTasks, admin_user: UserOut = Depends(get_current_admin)):
     current_settings = config.settings_coll.find_one({"_id": "current_event"})
@@ -41,26 +41,31 @@ def match_faces(background_tasks: BackgroundTasks, admin_user: UserOut = Depends
     background_tasks.add_task(run_face_matching)
     return {"message": "Face matching has started in the background.", "status": "processing"}
 
-# Add Depends(get_current_admin) to all admin endpoints
+
 @router.post("/create-user")
 def create_user(req: CreateUserRequest, admin: UserOut = Depends(get_current_admin)):
     if req.role not in ["photographer", "editor"]:
         raise HTTPException(status_code=400, detail="Invalid role")
+    
     email = f"{req.name}@arka.ai"
     password = token_urlsafe(8)
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    
+    if config.users_collection.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="User already exists")
+
     user_data = {
         "name": req.name,
         "email": email,
         "password": hashed_password.decode('utf-8'),
         "role": req.role,
-        "joined_event": config.CURRENT_EVENT_ID,
+        "joined_event": config.get_current_event_id(),
         "image": ""
     }
-    if config.users_collection.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="User already exists")
+    
     config.users_collection.insert_one(user_data)
     return {"email": email, "password": password, "role": req.role}
+
 
 @router.get("/list-users")
 def list_users(admin: UserOut = Depends(get_current_admin)):
@@ -83,24 +88,18 @@ def delete_user(req: DeleteUserRequest, admin: UserOut = Depends(get_current_adm
     config.users_collection.delete_one({"_id": user["_id"]})
     return {"success": True}
 
+
 @router.post("/create-event")
 def create_event(admin: UserOut = Depends(get_current_admin)):
     new_id = str(ObjectId())
 
-    # Update event ID in MongoDB
-    config.settings_coll.update_one(
-        {"_id": "current_event"},
-        {"$set": {"event_id": new_id}},
-        upsert=True
-    )
+    # Update event ID in DB and memory
+    config.set_current_event_id(new_id)
 
-    # Update in-memory event ID
-    config.CURRENT_EVENT_ID = new_id
-
-    # Clear cache
+    # Clear image match cache
     clear_event_cache()
 
-    # Clear previous data
+    # Wipe old data
     config.users_collection.delete_many({})
     config.feature_vector_collection.delete_many({})
     config.user_id_map.delete_many({})

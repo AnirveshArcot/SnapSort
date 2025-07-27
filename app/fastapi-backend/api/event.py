@@ -1,12 +1,12 @@
 # api/event.py
 from fastapi import APIRouter, Depends, HTTPException, Query
-from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
-from core.config import ALLOWED_EXTENSIONS, CDN_STORAGE_PATH
-from services.image_processing import decode_base64_image, get_cached_compressed_image, cache_compressed_image, CACHE_DIR
-import os, base64, json
 from fastapi.responses import FileResponse
 from typing import List
+from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
+from core.config import ALLOWED_EXTENSIONS, CDN_STORAGE_PATH, CACHE_DIR, get_current_event_id
+from services.image_processing import decode_base64_image, get_cached_compressed_image, cache_compressed_image
 from api.auth import get_me as get_current_user
+import os, base64, json
 import cv2
 
 router = APIRouter()
@@ -15,30 +15,47 @@ router = APIRouter()
 async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depends(get_current_user)):
     if current_user.role not in ["photographer", "editor"]:
         raise HTTPException(status_code=403, detail="Not allowed to upload images")
+
+    event_id = get_current_event_id()
+    if not event_id:
+        raise HTTPException(status_code=500, detail="Current event not set")
+
     if current_user.role == "editor":
-        event_folder = os.path.join(CDN_STORAGE_PATH, f"{current_user.joined_event}_edited")
+        event_folder = os.path.join(CDN_STORAGE_PATH, f"{event_id}_edited")
     else:
-        event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+        event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
+
     os.makedirs(event_folder, exist_ok=True)
     uploaded = []
+
     for img in req.images:
         header, _, payload = img.base64.partition(",")
         image_data = base64.b64decode(payload or img.base64)
         base_name, ext = os.path.splitext(img.filename)
         original_filename = f"{base_name}_original{ext}"
         original_path = os.path.join(event_folder, original_filename)
+
         with open(original_path, "wb") as fout:
             fout.write(image_data)
+
         uploaded.append(original_filename)
+
     return UploadImagesResponse(uploaded=uploaded)
+
 
 @router.get("/download")
 async def download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
-    folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    event_id = get_current_event_id()
+    if not event_id:
+        raise HTTPException(status_code=500, detail="Current event not set")
+
+    folder = os.path.join(CDN_STORAGE_PATH, event_id)
+
     if "_preview" in filename:
         base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
     else:
         base_name = os.path.splitext(filename)[0]
+
     if current_user.role == "editor":
         for ext in ALLOWED_EXTENSIONS:
             original_filename = f"{base_name}_original{ext}"
@@ -49,19 +66,27 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
     else:
         compressed_filename = f"{base_name}_compressed.jpeg"
         cache_path = os.path.join(CACHE_DIR, compressed_filename)
+
         cached_img = get_cached_compressed_image(compressed_filename)
         if cached_img is not None and os.path.exists(cache_path):
             return FileResponse(path=cache_path, filename=compressed_filename, media_type="application/octet-stream")
+
         file_path = os.path.join(folder, compressed_filename)
         if os.path.exists(file_path):
             img = cv2.imread(file_path)
             cache_compressed_image(compressed_filename, img)
             return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
+
         raise HTTPException(status_code=404, detail="File not found")
+
 
 @router.get("/get-images", response_model=List[dict])
 async def get_images(current_user: UserOut = Depends(get_current_user)):
-    event_folder = os.path.join(CDN_STORAGE_PATH, current_user.joined_event)
+    event_id = get_current_event_id()
+    if not event_id:
+        raise HTTPException(status_code=500, detail="Current event not set")
+
+    event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
     images = []
 
     if not os.path.exists(event_folder):
