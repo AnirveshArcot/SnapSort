@@ -5,7 +5,7 @@ const BACKEND_URL = process.env.BACKEND_URL;
 export async function POST(request: Request) {
   const cookie = request.headers.get("cookie") ?? "";
 
-  const res = await fetch(`${BACKEND_URL}/event/create-event`, {
+  const res = await fetch(`${BACKEND_URL}/admin/create-event`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
