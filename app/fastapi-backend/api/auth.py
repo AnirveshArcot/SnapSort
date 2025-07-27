@@ -1,9 +1,11 @@
 # api/auth.py
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, status, Cookie
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from db.models import RegisterUser, UserOut
-from core.config import users_collection, CURRENT_EVENT_ID, ADMIN_MAIL, ADMIN_PASSWORD
+from db.models import RegisterUser, User, UserOut
+from core.config import ALGORITHM, SECRET_KEY, users_collection, CURRENT_EVENT_ID, ADMIN_MAIL, ADMIN_PASSWORD
 from core.security import create_access_token
 from services.image_processing import decode_base64_image
 import bcrypt, jwt, numpy as np
@@ -35,25 +37,34 @@ def normalize_vectors(vectors):
     normalized_vectors = vectors / np.maximum(norms[:, np.newaxis], 1e-10)
     return normalized_vectors.astype('float32')
 
+executor = ThreadPoolExecutor()
+async def run_in_threadpool(func, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, func, *args, **kwargs)
 
-def get_current_user(auth_token: str = Cookie(None)) -> UserOut:
+async def get_current_user(
+    auth_token: str | None = Cookie(None),
+) -> UserOut:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
     if auth_token is None:
         raise credentials_exception
+
     try:
-        payload = jwt.decode(auth_token, ADMIN_PASSWORD, algorithms=["HS256"])
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
         role = payload.get("role", "user")
         if user_id is None:
             raise credentials_exception
     except jwt.PyJWTError:
         raise credentials_exception
+
     if role == "admin" and user_id == "admin":
-        return UserOut(
+        return User(
             id="NEO",
             name="ADMIN",
             email=ADMIN_MAIL,
@@ -61,15 +72,23 @@ def get_current_user(auth_token: str = Cookie(None)) -> UserOut:
             joined_event=CURRENT_EVENT_ID,
             role="admin"
         )
-    user = users_collection.find_one({"_id": ObjectId(user_id)})
+
+    try:
+        user = await run_in_threadpool(
+            users_collection.find_one, {"_id": ObjectId(user_id)}
+        )
+    except Exception:
+        raise credentials_exception
+
     if not user:
         raise credentials_exception
-    return UserOut(
+
+    return User(
         id=str(user["_id"]),
         name=user["name"],
         email=user["email"],
         image=user.get("image"),
-        joined_event=user.get("joined_event", CURRENT_EVENT_ID),
+        joined_event=CURRENT_EVENT_ID,
         role=user.get("role", "user")
     )
 
