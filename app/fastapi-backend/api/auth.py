@@ -35,6 +35,44 @@ def normalize_vectors(vectors):
     normalized_vectors = vectors / np.maximum(norms[:, np.newaxis], 1e-10)
     return normalized_vectors.astype('float32')
 
+
+def get_current_user(auth_token: str = Cookie(None)) -> UserOut:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if auth_token is None:
+        raise credentials_exception
+    try:
+        payload = jwt.decode(auth_token, ADMIN_PASSWORD, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        role = payload.get("role", "user")
+        if user_id is None:
+            raise credentials_exception
+    except jwt.PyJWTError:
+        raise credentials_exception
+    if role == "admin" and user_id == "admin":
+        return UserOut(
+            id="NEO",
+            name="ADMIN",
+            email=ADMIN_MAIL,
+            image="",
+            joined_event=CURRENT_EVENT_ID,
+            role="admin"
+        )
+    user = users_collection.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise credentials_exception
+    return UserOut(
+        id=str(user["_id"]),
+        name=user["name"],
+        email=user["email"],
+        image=user.get("image"),
+        joined_event=user.get("joined_event", CURRENT_EVENT_ID),
+        role=user.get("role", "user")
+    )
+
 @router.post("/register", response_model=UserOut)
 def register_user(user: RegisterUser):
     global faiss_index
@@ -118,62 +156,17 @@ def logout():
     resp.delete_cookie("auth_token", path="/")
     return resp
 
-@router.get("/me", response_model=UserOut)
-def get_me(auth_token: str = Cookie(None)):
-    if not auth_token:
-        raise HTTPException(status_code=401, detail="No auth token")
-    try:
-        payload = jwt.decode(auth_token, ADMIN_PASSWORD, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        if payload.get("role") == "admin":
-            return UserOut(id="admin", name="ADMIN", email=ADMIN_MAIL, image="", joined_event=CURRENT_EVENT_ID, role="admin")
-        user = users_collection.find_one({"_id": ObjectId(user_id)})
-        return UserOut(
-            id=str(user["_id"]),
-            name=user["name"],
-            email=user["email"],
-            image=user.get("image"),
-            joined_event=user.get("joined_event"),
-            role=user.get("role")
-        )
-    except:
-        raise HTTPException(status_code=401, detail="Invalid token")
+
+@router.get("/auth/me", response_model=UserOut)
+async def get_me(current_user: UserOut = Depends(get_current_user)):
+    return UserOut(
+        id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        image=current_user.image,
+        joined_event=CURRENT_EVENT_ID,
+        role=current_user.role,
+    )
     
 
     
-def get_current_user(auth_token: str = Cookie(None)) -> UserOut:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    if auth_token is None:
-        raise credentials_exception
-    try:
-        payload = jwt.decode(auth_token, ADMIN_PASSWORD, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        role = payload.get("role", "user")
-        if user_id is None:
-            raise credentials_exception
-    except jwt.PyJWTError:
-        raise credentials_exception
-    if role == "admin" and user_id == "admin":
-        return UserOut(
-            id="NEO",
-            name="ADMIN",
-            email=ADMIN_MAIL,
-            image="",
-            joined_event=CURRENT_EVENT_ID,
-            role="admin"
-        )
-    user = users_collection.find_one({"_id": ObjectId(user_id)})
-    if not user:
-        raise credentials_exception
-    return UserOut(
-        id=str(user["_id"]),
-        name=user["name"],
-        email=user["email"],
-        image=user.get("image"),
-        joined_event=user.get("joined_event", CURRENT_EVENT_ID),
-        role=user.get("role", "user")
-    )
