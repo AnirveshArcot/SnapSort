@@ -3,9 +3,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 
 export const metadata = {
-  title: "EventShare - Share Event Photos",
-  description: "Join events and share photos with friends and colleagues",
-    generator: 'v0.dev'
+  title: "SnapSort - Share Event Photos",
 }
 
 export default function RootLayout({
