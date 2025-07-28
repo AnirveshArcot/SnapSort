@@ -25,9 +25,6 @@ dimension = 4096
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-os.makedirs(CDN_STORAGE_PATH, exist_ok=True)
-os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
-
 _current_event_id = None
 _faiss_index = None
 
@@ -38,19 +35,25 @@ def is_mounted(path: str) -> bool:
 
 def mount_ftp():
     try:
-        print("📦 Attempting to mount FTP...")
+        print("Attempting to mount FTP...")
         subprocess.run(
             ["sudo", "curlftpfs", "ftpuser:arka6969@122.166.210.200", CDN_STORAGE_PATH, "-o", "allow_other"],
             check=True
         )
-        print("FTP mounted successfully.")
+        if is_mounted(CDN_STORAGE_PATH):
+            print("FTP mounted successfully.")
+            os.makedirs(CDN_STORAGE_PATH, exist_ok=True)
+            os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
+        else:
+            print("Mount point not detected after mount attempt.")
     except subprocess.CalledProcessError as e:
         print(f"Mount attempt failed: {e}")
 
 
+
 def unmount_ftp():
     try:
-        print("🔻 Unmounting FTP...")
+        print("Unmounting FTP...")
         subprocess.run(["sudo", "umount", "-l", CDN_STORAGE_PATH], check=True)
         print("FTP unmounted.")
     except subprocess.CalledProcessError as e:
