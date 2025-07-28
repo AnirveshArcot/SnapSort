@@ -1,27 +1,28 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { checkCDNMounted } from "@/lib/api";
+import { usePathname, useRouter } from "next/navigation";
 
 export default function CDNGuard({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
-    const verifyCDN = async () => {
+    const checkCDNMounted = async () => {
       try {
-        const data = await checkCDNMounted();
-        if (!data.mounted) {
-          router.replace("/cdn-unavailable");
+        const res = await fetch("/api/cdn-status", { cache: "no-store" });
+        const data = await res.json();
+        if (!data.ok) {
+          router.push("/login");
         }
       } catch (err) {
         console.error("CDN check failed:", err);
-        router.replace("/cdn-unavailable");
+        router.push("/login");
       }
     };
 
-    verifyCDN();
-  }, []);
+    checkCDNMounted();
+  }, [pathname]);
 
   return <>{children}</>;
 }
