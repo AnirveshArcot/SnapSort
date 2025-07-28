@@ -55,7 +55,7 @@ def mount_ftp():
 def unmount_ftp():
     try:
         print("Unmounting FTP...")
-        subprocess.run(["sudo", "umount", "-l", ], check=True)
+        subprocess.run(["sudo", "umount", "-l",CDN_STORAGE_PATH ], check=True)
         print("FTP unmounted.")
     except subprocess.CalledProcessError as e:
         print(f"Unmount failed: {e}")
