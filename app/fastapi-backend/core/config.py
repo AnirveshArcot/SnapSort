@@ -99,6 +99,6 @@ async def lifespan(app):
     get_faiss_index()
     settings_coll.update_one({"_id": "current_event"}, {"$set": {"status": "free"}}, upsert=True)
 
-    # start_mount_thread()
+    start_mount_thread()
 
     yield
