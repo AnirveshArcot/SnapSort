@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from typing import List
 from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
-from core.config import ALLOWED_EXTENSIONS, CDN_STORAGE_PATH, CACHE_DIR, get_current_event_id
+from core.config import ALLOWED_EXTENSIONS, IMAGE_STORAGE_PATH, CACHE_DIR, get_current_event_id
 from services.image_processing import decode_base64_image, get_cached_compressed_image, cache_compressed_image
 from api.auth import get_me as get_current_user
 import os, base64, json
@@ -21,9 +21,9 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
         raise HTTPException(status_code=500, detail="Current event not set")
 
     if current_user.role == "editor":
-        event_folder = os.path.join(CDN_STORAGE_PATH, f"{event_id}_edited")
+        event_folder = os.path.join(IMAGE_STORAGE_PATH, f"{event_id}_edited")
     else:
-        event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
+        event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
 
     os.makedirs(event_folder, exist_ok=True)
     uploaded = []
@@ -49,7 +49,7 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 
-    folder = os.path.join(CDN_STORAGE_PATH, event_id)
+    folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
 
     if "_preview" in filename:
         base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
@@ -86,7 +86,7 @@ async def get_images(current_user: UserOut = Depends(get_current_user)):
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 
-    event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
+    event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
     images = []
 
     if not os.path.exists(event_folder):

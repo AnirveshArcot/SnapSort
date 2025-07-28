@@ -10,7 +10,7 @@ from core.config import (
     settings_coll,
     feature_vector_collection,
     user_id_map,
-    CDN_STORAGE_PATH,
+    IMAGE_STORAGE_PATH,
     ALLOWED_EXTENSIONS,
     SIMILARITY_THRESHOLD,
     get_current_event_id,
@@ -74,7 +74,7 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
         return None
 
 def upload_to_cdn(file_name, json_data):
-    file_path = os.path.join(CDN_STORAGE_PATH, file_name)
+    file_path = os.path.join(IMAGE_STORAGE_PATH, file_name)
 
     try:
         with open(file_path, "w") as f:
@@ -85,7 +85,7 @@ def upload_to_cdn(file_name, json_data):
     return {"url": f"local://{file_path}"}  # Simulated URL
 
 def list_event_files(event_id: str):
-    event_folder = os.path.join(CDN_STORAGE_PATH, event_id)
+    event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
     if not os.path.exists(event_folder) or not os.path.isdir(event_folder):
         raise HTTPException(status_code=400, detail=f"Event folder not found: {event_id}")
 

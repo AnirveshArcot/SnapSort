@@ -105,7 +105,7 @@ def create_event(admin: UserOut = Depends(get_current_admin)):
     config.user_id_map.delete_many({})
 
     # Create event folder in CDN
-    event_folder_path = os.path.join(config.CDN_STORAGE_PATH, new_id)
+    event_folder_path = os.path.join(config.IMAGE_STORAGE_PATH, new_id)
     os.makedirs(event_folder_path, exist_ok=True)
 
     return {"event_id": new_id}

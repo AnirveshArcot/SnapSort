@@ -16,7 +16,8 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 ALGORITHM = "HS256"
 
-CDN_STORAGE_PATH = "./cdn_storage/image_storage"
+CDN_STORAGE_PATH="./cdn_storage/"
+IMAGE_STORAGE_PATH = "./cdn_storage/image_storage/"
 FAISS_INDEX_DIR = "./cdn_storage/faiss_indices/"
 CACHE_DIR = "./image_cache/"
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
@@ -42,7 +43,7 @@ def mount_ftp():
         )
         if is_mounted(CDN_STORAGE_PATH):
             print("FTP mounted successfully.")
-            os.makedirs(CDN_STORAGE_PATH, exist_ok=True)
+            os.makedirs(IMAGE_STORAGE_PATH, exist_ok=True)
             os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
         else:
             print("Mount point not detected after mount attempt.")
@@ -54,7 +55,7 @@ def mount_ftp():
 def unmount_ftp():
     try:
         print("Unmounting FTP...")
-        subprocess.run(["sudo", "umount", "-l", CDN_STORAGE_PATH], check=True)
+        subprocess.run(["sudo", "umount", "-l", ], check=True)
         print("FTP unmounted.")
     except subprocess.CalledProcessError as e:
         print(f"Unmount failed: {e}")
