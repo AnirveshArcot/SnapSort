@@ -38,7 +38,7 @@ def is_mounted(path: str) -> bool:
 
 def mount_ftp():
     try:
-        print("Attempting to mount FTP...")
+        print("📦 Attempting to mount FTP...")
         subprocess.run(
             ["sudo", "curlftpfs", "ftpuser:arka6969@122.166.210.200", CDN_STORAGE_PATH, "-o", "allow_other"],
             check=True
@@ -46,6 +46,15 @@ def mount_ftp():
         print("FTP mounted successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Mount attempt failed: {e}")
+
+
+def unmount_ftp():
+    try:
+        print("🔻 Unmounting FTP...")
+        subprocess.run(["sudo", "umount", "-l", CDN_STORAGE_PATH], check=True)
+        print("FTP unmounted.")
+    except subprocess.CalledProcessError as e:
+        print(f"Unmount failed: {e}")
 
 
 def auto_mount_loop():
@@ -93,12 +102,18 @@ def set_faiss_index(index):
         save_faiss_index(index, current_event_id)
 
 
+
 async def lifespan(app):
+    print("Starting up application")
+
     if get_current_event_id() is None:
-        settings_coll.update_one({"_id": "current_event"}, {"$set": {"event_id": "default_event"}}, upsert=True)
+        set_current_event_id("default_event")
+
     get_faiss_index()
     settings_coll.update_one({"_id": "current_event"}, {"$set": {"status": "free"}}, upsert=True)
-
     start_mount_thread()
 
     yield
+
+    print("Cleaning up application")
+    unmount_ftp()
