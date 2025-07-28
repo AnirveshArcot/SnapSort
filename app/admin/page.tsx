@@ -272,7 +272,7 @@ export default function AdminPage() {
       <header className="border-b">
         <div className="flex h-16 items-center justify-between px-3 sm:px-10">
           <Link href="/" className="flex items-center">
-            <span className="text-xl font-bold">EventShare</span>
+            <span className="text-xl font-bold">SnapSort</span>
           </Link>
 
           <nav className="flex items-center">
