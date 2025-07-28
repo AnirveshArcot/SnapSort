@@ -82,14 +82,8 @@ export async function downloadImageBlob(filename: string): Promise<Blob> {
   return await res.blob();
 }
 
-export async function checkCDNMounted(): Promise<boolean> {
-  try {
-    const data = await fetchAPI("/check-cdn");
-    return data.mounted;
-  } catch (error) {
-    console.error("CDN check failed:", error);
-    return false;
-  }
+export async function checkCDNMounted(){
+  return await fetchAPI('/admin/check-cdn');
 }
 
 

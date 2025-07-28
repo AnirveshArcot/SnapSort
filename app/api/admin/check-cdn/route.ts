@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/status/cdn-mounted`, {
+    const res = await fetch(`${process.env.BACKEND_URL}/status/cdn-mounted`, {
       cache: "no-store",
     });
 
