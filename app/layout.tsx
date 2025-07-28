@@ -2,23 +2,11 @@ import type React from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 import { redirect } from "next/navigation";
+import { checkCDNMounted } from "@/lib/api";
 
 export const metadata = {
   title: "SnapSort - Share Event Photos",
 };
-
-async function checkCDNMounted(): Promise<boolean> {
-  try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/check-cdn`, {
-      cache: "no-store",
-    });
-    const data = await res.json();
-    return data.mounted;
-  } catch (err) {
-    console.error("CDN check failed:", err);
-    return false;
-  }
-}
 
 export default async function RootLayout({
   children,
