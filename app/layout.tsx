@@ -1,16 +1,36 @@
-import type React from "react"
-import { ThemeProvider } from "@/components/theme-provider"
-import "./globals.css"
+import type React from "react";
+import { ThemeProvider } from "@/components/theme-provider";
+import "./globals.css";
+import { redirect } from "next/navigation";
 
 export const metadata = {
   title: "SnapSort - Share Event Photos",
+};
+
+async function checkCDNMounted(): Promise<boolean> {
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/check-cdn`, {
+      cache: "no-store",
+    });
+    const data = await res.json();
+    return data.mounted;
+  } catch (err) {
+    console.error("CDN check failed:", err);
+    return false;
+  }
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
+  const cdnMounted = await checkCDNMounted();
+
+  if (!cdnMounted) {
+    redirect("/cdn-unavailable");
+  }
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-background font-sans antialiased">
@@ -21,9 +41,5 @@ export default function RootLayout({
         </ThemeProvider>
       </body>
     </html>
-  )
+  );
 }
-
-
-
-import './globals.css'
