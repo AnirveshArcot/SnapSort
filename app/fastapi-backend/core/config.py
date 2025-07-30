@@ -16,10 +16,15 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 ALGORITHM = "HS256"
 
-CDN_STORAGE_PATH="/home/ubuntu/SnapSort/app/fastapi-backend/cdn_storage"
-IMAGE_STORAGE_PATH = "/home/ubuntu/SnapSort/app/fastapi-backend/cdn_storage"
-FAISS_INDEX_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/cdn_storage"
+CDN_STORAGE_PATH = os.getenv("CDN_STORAGE_PATH", "/home/ubuntu/SnapSort/app/fastapi-backend/cdn_storage")
+REMOTE_USER = os.getenv("REMOTE_USER")
+REMOTE_HOST = os.getenv("REMOTE_HOST")
+REMOTE_PATH = os.getenv("REMOTE_PATH")
+
+IMAGE_STORAGE_PATH = CDN_STORAGE_PATH
+FAISS_INDEX_DIR = CDN_STORAGE_PATH
 CACHE_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/image_cache"
+
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 SIMILARITY_THRESHOLD = 0.5
 dimension = 4096
@@ -34,29 +39,28 @@ def is_mounted(path: str) -> bool:
     return os.path.ismount(path)
 
 
-def mount_ftp():
+def mount_sshfs():
     try:
-        print("Attempting to mount FTP...")
+        print("Attempting to mount SSHFS...")
         subprocess.run(
-            ["sudo", "curlftpfs", "ftpuser:arka6969@122.166.210.200", CDN_STORAGE_PATH, "-o", "allow_other"],
+            ["sshfs", f"{REMOTE_USER}@{REMOTE_HOST}:{REMOTE_PATH}", CDN_STORAGE_PATH, "-o", "idmap=user"],
             check=True
         )
         if is_mounted(CDN_STORAGE_PATH):
-            print("FTP mounted successfully.")
+            print("SSHFS mounted successfully.")
             os.makedirs(IMAGE_STORAGE_PATH, exist_ok=True)
             os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
         else:
-            print("Mount point not detected after mount attempt.")
+            print("Mount point not detected after SSHFS attempt.")
     except subprocess.CalledProcessError as e:
-        print(f"Mount attempt failed: {e}")
+        print(f"SSHFS mount failed: {e}")
 
 
-
-def unmount_ftp():
+def unmount_sshfs():
     try:
-        print("Unmounting FTP...")
-        subprocess.run(["sudo", "umount", "-l",CDN_STORAGE_PATH ], check=True)
-        print("FTP unmounted.")
+        print("Unmounting SSHFS...")
+        subprocess.run(["fusermount", "-u", CDN_STORAGE_PATH], check=True)
+        print("SSHFS unmounted.")
     except subprocess.CalledProcessError as e:
         print(f"Unmount failed: {e}")
 
@@ -64,7 +68,7 @@ def unmount_ftp():
 def auto_mount_loop():
     while True:
         if not is_mounted(CDN_STORAGE_PATH):
-            mount_ftp()
+            mount_sshfs()
         time.sleep(10)
 
 
@@ -106,7 +110,6 @@ def set_faiss_index(index):
         save_faiss_index(index, current_event_id)
 
 
-
 async def lifespan(app):
     print("Starting up application")
 
@@ -120,4 +123,4 @@ async def lifespan(app):
     yield
 
     print("Cleaning up application")
-    unmount_ftp()
+    unmount_sshfs()
