@@ -16,10 +16,10 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 ALGORITHM = "HS256"
 
-CDN_STORAGE_PATH="./cdn_storage/"
-IMAGE_STORAGE_PATH = "./cdn_storage/image_storage/"
-FAISS_INDEX_DIR = "./cdn_storage/faiss_indices/"
-CACHE_DIR = "./image_cache/"
+CDN_STORAGE_PATH="/home/ubuntu/SnapSort/app/fastapi-backend/cdn_storage"
+IMAGE_STORAGE_PATH = "/home/ubuntu/SnapSort/app/fastapi-backend/cdn_storage"
+FAISS_INDEX_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/cdn_storage"
+CACHE_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/image_cache"
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 SIMILARITY_THRESHOLD = 0.5
 dimension = 4096
