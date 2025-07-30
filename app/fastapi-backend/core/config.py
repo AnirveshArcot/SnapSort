@@ -44,7 +44,7 @@ def mount_sshfs():
         print("Attempting to mount SSHFS with password...")
         subprocess.run(
             [
-                "sshpass", "-p", "3616", "sshfs",
+                "sshfs",
                 f"{REMOTE_USER}@{REMOTE_HOST}:{REMOTE_PATH}",
                 CDN_STORAGE_PATH,
                 "-o", "idmap=user",
