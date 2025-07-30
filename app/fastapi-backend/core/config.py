@@ -41,9 +41,14 @@ def is_mounted(path: str) -> bool:
 
 def mount_sshfs():
     try:
-        print("Attempting to mount SSHFS...")
+        print("Attempting to mount SSHFS with password...")
         subprocess.run(
-            ["sshfs", f"{REMOTE_USER}@{REMOTE_HOST}:{REMOTE_PATH}", CDN_STORAGE_PATH, "-o", "idmap=user"],
+            [
+                "sshpass", "-p", "3616", "sshfs",
+                f"{REMOTE_USER}@{REMOTE_HOST}:{REMOTE_PATH}",
+                CDN_STORAGE_PATH,
+                "-o", "idmap=user"
+            ],
             check=True
         )
         if is_mounted(CDN_STORAGE_PATH):
