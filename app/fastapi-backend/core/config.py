@@ -21,8 +21,8 @@ REMOTE_USER = os.getenv("REMOTE_USER")
 REMOTE_HOST = os.getenv("REMOTE_HOST")
 REMOTE_PATH = os.getenv("REMOTE_PATH")
 
-IMAGE_STORAGE_PATH = CDN_STORAGE_PATH
-FAISS_INDEX_DIR = CDN_STORAGE_PATH
+IMAGE_STORAGE_PATH = CDN_STORAGE_PATH+"/image_storage"
+FAISS_INDEX_DIR = CDN_STORAGE_PATH+"/faiss_indices"
 CACHE_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/image_cache"
 
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
