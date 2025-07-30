@@ -47,7 +47,8 @@ def mount_sshfs():
                 "sshpass", "-p", "3616", "sshfs",
                 f"{REMOTE_USER}@{REMOTE_HOST}:{REMOTE_PATH}",
                 CDN_STORAGE_PATH,
-                "-o", "idmap=user"
+                "-o", "idmap=user",
+                "-o", "IdentityFile=/home/ubuntu/.ssh/windows_key",
             ],
             check=True
         )
@@ -63,11 +64,12 @@ def mount_sshfs():
 
 def unmount_sshfs():
     try:
-        print("Unmounting SSHFS...")
-        subprocess.run(["fusermount", "-u", CDN_STORAGE_PATH], check=True)
-        print("SSHFS unmounted.")
+        print("Attempting to unmount SSHFS...")
+        subprocess.run(["umount", CDN_STORAGE_PATH], check=True)
+        print("Unmounted SSHFS successfully.")
     except subprocess.CalledProcessError as e:
-        print(f"Unmount failed: {e}")
+        print(f"Failed to unmount SSHFS: {e}")
+
 
 
 def auto_mount_loop():
