@@ -2,6 +2,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from typing import List
+
+from grpc import Status
+import numpy as np
 from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
 from core.config import ALLOWED_EXTENSIONS, IMAGE_STORAGE_PATH, CACHE_DIR, get_current_event_id
 from services.image_processing import decode_base64_image, get_cached_compressed_image, cache_compressed_image
@@ -13,13 +16,14 @@ router = APIRouter()
 
 @router.post("/upload-images", response_model=UploadImagesResponse)
 async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depends(get_current_user)):
-    if current_user.role not in ["photographer", "editor"]:
+    if current_user.role not in ["photographer", "editor", "admin"]:
         raise HTTPException(status_code=403, detail="Not allowed to upload images")
 
     event_id = get_current_event_id()
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 
+    # Determine event folder based on role
     if current_user.role == "editor":
         event_folder = os.path.join(IMAGE_STORAGE_PATH, f"{event_id}_edited")
     else:
@@ -30,17 +34,77 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
 
     for img in req.images:
         header, _, payload = img.base64.partition(",")
-        image_data = base64.b64decode(payload or img.base64)
+        try:
+            image_data = base64.b64decode(payload or img.base64)
+        except Exception as e:
+            raise HTTPException(
+                status_code=Status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid base64 image for file {img.filename}: {e}"
+            )
+
         base_name, ext = os.path.splitext(img.filename)
+
+        if current_user.role == "editor":
+            base_name = f"{base_name}_edited"
+            filename = f"{base_name}{ext}"
+            file_path = os.path.join(event_folder, filename)
+            with open(file_path, "wb") as fout:
+                fout.write(image_data)
+            uploaded.append(filename)
+            continue
+
         original_filename = f"{base_name}_original{ext}"
         original_path = os.path.join(event_folder, original_filename)
-
         with open(original_path, "wb") as fout:
             fout.write(image_data)
-
         uploaded.append(original_filename)
 
+        try:
+            nparr = np.frombuffer(image_data, np.uint8)
+            img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img_np is None:
+                raise ValueError("Decoded image is None")
+
+            preview = cv2.resize(img_np, (0, 0), fx=0.25, fy=0.25)
+            preview_filename = f"{base_name}_preview.jpeg"
+            preview_path = os.path.join(event_folder, preview_filename)
+
+            quality = 60
+            while True:
+                success, buffer = cv2.imencode(".jpeg", preview, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                if not success:
+                    raise ValueError("Failed to encode preview image")
+                if len(buffer) <= 50 * 1024 or quality <= 30:
+                    break
+                quality -= 5
+
+            with open(preview_path, "wb") as fout:
+                fout.write(buffer)
+            uploaded.append(preview_filename)
+            compressed_filename = f"{base_name}_compressed.jpeg"
+            compressed_path = os.path.join(event_folder, compressed_filename)
+
+            quality = 80
+            while True:
+                success, buffer = cv2.imencode(".jpeg", img_np, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                if not success:
+                    raise ValueError("Failed to encode compressed image")
+                if len(buffer) <= 512 * 1024 or quality <= 40:
+                    break
+                quality -= 5
+
+            with open(compressed_path, "wb") as fout:
+                fout.write(buffer)
+            uploaded.append(compressed_filename)
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process image {img.filename}: {e}"
+            )
+
     return UploadImagesResponse(uploaded=uploaded)
+
 
 
 @router.get("/download")
