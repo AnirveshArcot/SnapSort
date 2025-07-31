@@ -387,7 +387,7 @@ export default function AdminPage() {
             {isAdmin && (
               <TabsContent value="users">
                 {/* User Management Tab */}
-                <div className="border rounded-lg p-4 mb-6 bg-gray-50">
+                <div className="border rounded-lg p-4 mb-6 ">
                   <h3 className="text-lg font-semibold mb-2">Manage Users</h3>
                   <form className="flex flex-col sm:flex-row gap-2 items-start sm:items-end" onSubmit={handleCreateUser}>
                     <div>
