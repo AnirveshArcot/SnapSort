@@ -28,9 +28,8 @@ async def get_current_admin(current_user: UserOut = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
-
 @router.post("/match_faces")
-async def match_faces(background_tasks: BackgroundTasks, admin_user: UserOut = Depends(get_current_admin)):
+async def match_faces(admin_user: UserOut = Depends(get_current_admin)):
     current_settings = await config.settings_coll.find_one({"_id": "current_event"})
     current_status = current_settings.get("status") if current_settings else "free"
     if current_status == "processing":
@@ -41,8 +40,11 @@ async def match_faces(background_tasks: BackgroundTasks, admin_user: UserOut = D
         {"$set": {"status": "processing"}},
         upsert=True
     )
-    background_tasks.add_task(run_face_matching)
+
+    asyncio.create_task(run_face_matching())  # ✅ Run async function in background
+
     return {"message": "Face matching has started in the background.", "status": "processing"}
+
 
 
 @router.post("/create-user")
