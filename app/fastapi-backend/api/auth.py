@@ -131,7 +131,7 @@ async def register_user(user: RegisterUser):
         {"_id": mongo_id}, {"$set": feature_record}, upsert=True
     )
 
-    faiss_index = get_faiss_index()
+    faiss_index = await get_faiss_index()
     if faiss_index is None:
         faiss_index = load_faiss_index(current_event, dimension)
         set_faiss_index(faiss_index)
