@@ -425,7 +425,7 @@ export default function AdminPage() {
                     </div>
                   )}
                 </div>
-                <div className="border rounded-lg p-4 mb-6 bg-gray-50">
+                <div className="border rounded-lg p-4 mb-6">
                   <h3 className="text-lg font-semibold mb-2">All Users (Photographers & Editors)</h3>
                   {loadingUsers ? (
                     <div>Loading users…</div>
