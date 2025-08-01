@@ -94,25 +94,40 @@ async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
 
 @router.post("/register", response_model=UserOut)
 def register_user(user: RegisterUser):
+    print("[1] Start: Checking if user already exists")
     if users_collection.find_one({"email": user.email}):
         raise HTTPException(status_code=400, detail="Email already registered.")
 
+    print("[2] Hashing password")
     hashed_password = bcrypt.hashpw(user.password.encode('utf-8'), bcrypt.gensalt())
 
     try:
+        print("[3] Decoding base64 image")
         img = decode_base64_image(user.image)
         if img is None:
             raise ValueError("Invalid image data")
+        print(f"[4] Image decoded, shape: {img.shape}")
+
+        print("[5] Running face localization")
         box = localize_faces_func(img)
+        print(f"[6] Face box: {box}")
         if not box:
             raise ValueError("No face detected in the image")
+
+        print("[7] Cropping face")
         x, y, w, h = box[0]
         face_img = img[y:y + h, x:x + w]
+
+        print("[8] Extracting feature vector")
         vec = extract_features_func(face_img)
+        print(f"[9] Feature vector length: {len(vec)}")
     except Exception as e:
+        print(f"[X] Exception during image/face processing: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process image: {e}")
 
+    print("[10] Getting current event ID")
     current_event = get_current_event_id()
+
     user_data = {
         "name": user.name,
         "email": user.email,
@@ -122,32 +137,41 @@ def register_user(user: RegisterUser):
         "role": "user"
     }
 
+    print("[11] Inserting user into MongoDB")
     result = users_collection.insert_one(user_data)
     mongo_id = result.inserted_id
     int_id = allocate_int_id_for(str(mongo_id))
+    print(f"[12] Mongo ID: {mongo_id}, Int ID: {int_id}")
 
+    print("[13] Inserting feature vector into DB")
     feature_record = {
         "_id": mongo_id,
         "feature_vector": np.array(vec).tolist(),
         "event_id": current_event
     }
-
     feature_vector_collection.update_one(
         {"_id": mongo_id},
         {"$set": feature_record},
         upsert=True
     )
 
+    print("[14] FAISS: Getting index")
     faiss_index = get_faiss_index()
     if faiss_index is None:
+        print("[15] FAISS index not in memory, loading from disk")
         faiss_index = load_faiss_index(current_event, dimension)
         set_faiss_index(faiss_index)
 
+    print("[16] Normalizing and adding to FAISS")
     normed = normalize_vectors(np.array([vec]).astype("float32"))
     faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
+
+    print("[17] Saving FAISS index to disk")
     save_faiss_index(faiss_index, current_event)
 
+    print("[✔] Registration complete")
     return UserOut(id=str(mongo_id), **user_data)
+
 
 @router.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
