@@ -1,6 +1,5 @@
 # db/mongo.py
-
-from pymongo import MongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from dotenv import load_dotenv
 
@@ -8,7 +7,7 @@ load_dotenv()
 
 MONGODB_URI = os.getenv("MONGODB_URI")
 
-client = MongoClient(MONGODB_URI)
+client = AsyncIOMotorClient(MONGODB_URI)
 db = client["snap-sort"]
 
 users_collection = db["users"]

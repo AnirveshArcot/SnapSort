@@ -1,6 +1,7 @@
 import os
 import subprocess
 import threading
+import asyncio
 import time
 from dotenv import load_dotenv
 from services.faiss_index import load_faiss_index, save_faiss_index
@@ -21,8 +22,8 @@ REMOTE_USER = os.getenv("REMOTE_USER")
 REMOTE_HOST = os.getenv("REMOTE_HOST")
 REMOTE_PATH = os.getenv("REMOTE_PATH")
 
-IMAGE_STORAGE_PATH = CDN_STORAGE_PATH+"/image_storage"
-FAISS_INDEX_DIR = CDN_STORAGE_PATH+"/faiss_indices"
+IMAGE_STORAGE_PATH = f"{CDN_STORAGE_PATH}/image_storage"
+FAISS_INDEX_DIR = f"{CDN_STORAGE_PATH}/faiss_indices"
 CACHE_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/image_cache"
 
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
@@ -71,48 +72,50 @@ def unmount_sshfs():
         print(f"Failed to unmount SSHFS: {e}")
 
 
-
-def auto_mount_loop():
-    while True:
-        if not is_mounted(CDN_STORAGE_PATH):
-            mount_sshfs()
-        time.sleep(10)
-
-
 def start_mount_thread():
+    def auto_mount_loop():
+        while True:
+            if not is_mounted(CDN_STORAGE_PATH):
+                mount_sshfs()
+            time.sleep(10)
+
     thread = threading.Thread(target=auto_mount_loop, daemon=True)
     thread.start()
 
 
-def get_current_event_id() -> str | None:
+async def get_current_event_id() -> str | None:
     global _current_event_id
     if _current_event_id is not None:
         return _current_event_id
-    doc = settings_coll.find_one({"_id": "current_event"})
+    doc = await settings_coll.find_one({"_id": "current_event"})
     if doc:
         _current_event_id = str(doc["event_id"])
     return _current_event_id
 
 
-def set_current_event_id(event_id: str):
+async def set_current_event_id(event_id: str):
     global _current_event_id
     _current_event_id = event_id
-    settings_coll.update_one({"_id": "current_event"}, {"$set": {"event_id": event_id}}, upsert=True)
+    await settings_coll.update_one(
+        {"_id": "current_event"},
+        {"$set": {"event_id": event_id}},
+        upsert=True
+    )
 
 
-def get_faiss_index():
+async def get_faiss_index():
     global _faiss_index
     if _faiss_index is None:
-        current_event_id = get_current_event_id()
+        current_event_id = await get_current_event_id()
         if current_event_id:
             _faiss_index = load_faiss_index(current_event_id, dimension)
     return _faiss_index
 
 
-def set_faiss_index(index):
+async def set_faiss_index(index):
     global _faiss_index
     _faiss_index = index
-    current_event_id = get_current_event_id()
+    current_event_id = await get_current_event_id()
     if current_event_id:
         save_faiss_index(index, current_event_id)
 
@@ -120,11 +123,16 @@ def set_faiss_index(index):
 async def lifespan(app):
     print("Starting up application")
 
-    if get_current_event_id() is None:
-        set_current_event_id("default_event")
+    current_event_id = await get_current_event_id()
+    if current_event_id is None:
+        await set_current_event_id("default_event")
 
-    get_faiss_index()
-    settings_coll.update_one({"_id": "current_event"}, {"$set": {"status": "free"}}, upsert=True)
+    await get_faiss_index()
+    await settings_coll.update_one(
+        {"_id": "current_event"},
+        {"$set": {"status": "free"}},
+        upsert=True
+    )
     start_mount_thread()
 
     yield
