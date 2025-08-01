@@ -20,11 +20,18 @@ from deepface import DeepFace
 from ultralytics import YOLO
 
 model = YOLO("./model.pt")
-feature_model= DeepFace.build_model("VGG-Face")
+arcface_model = DeepFace.build_model("ArcFace")
+
 def extract_features_func(face_image):
-    result = DeepFace.represent(face_image, model_name="VGG-Face", model=model,
-                                enforce_detection=False, align=True)
+    result = DeepFace.represent(
+        face_image,
+        model_name="ArcFace",
+        model=arcface_model,
+        enforce_detection=False,
+        align=True
+    )
     return result[0]["embedding"]
+
 
 def localize_faces_func(image):
     results = model.predict(source=image, conf=0.25, verbose=False)
