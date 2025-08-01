@@ -130,6 +130,7 @@ def list_event_files(event_id: str):
 async def run_face_matching():
     try:
         current_event = await get_current_event_id()
+        print(current_event)
         if not current_event:
             raise ValueError("No current event ID set")
 
@@ -165,6 +166,7 @@ async def run_face_matching():
         }
 
         process = psutil.Process()
+        print(compressed_files)
 
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             base, ext = os.path.splitext(file_name)
