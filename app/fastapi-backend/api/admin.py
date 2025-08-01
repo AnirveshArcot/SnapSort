@@ -98,7 +98,7 @@ async def delete_user(req: DeleteUserRequest, admin: UserOut = Depends(get_curre
 async def create_event(admin: UserOut = Depends(get_current_admin)):
     new_id = str(ObjectId())
 
-    config.set_current_event_id(new_id)
+    await config.set_current_event_id(new_id)
     clear_event_cache()
 
     # Clear old collections
