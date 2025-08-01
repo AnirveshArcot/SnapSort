@@ -140,7 +140,7 @@ async def run_face_matching():
             for record in id_map_list if "int_id" in record
         }
 
-        for file_name in compressed_files:
+        for file_name in tqdm(compressed_files, desc="Matching Faces"):
             base, ext = os.path.splitext(file_name)
             if not base.endswith("_compressed"):
                 continue
