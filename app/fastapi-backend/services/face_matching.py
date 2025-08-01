@@ -140,7 +140,7 @@ async def run_face_matching():
             )
             return
 
-        id_map_list = list(user_id_map.find({}, {"int_id": 1, "_id": 1}))
+        id_map_list = list(await user_id_map.find({}, {"int_id": 1, "_id": 1}))
         print(f"[DEBUG] ID map records loaded: {len(id_map_list)}")
 
         int_id_to_obj = {
