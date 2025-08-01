@@ -196,8 +196,9 @@ async def run_face_matching():
                 continue
 
             finally:
-                # Clean up memory
-                del image, file, result
+                for var in ['image', 'file', 'result']:
+                    if var in locals():
+                        del locals()[var]
                 gc.collect()
 
         matches_json = {"matches": matches}
