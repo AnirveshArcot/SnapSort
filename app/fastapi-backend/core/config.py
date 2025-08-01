@@ -96,6 +96,7 @@ async def get_current_event_id() -> str | None:
 async def set_current_event_id(event_id: str):
     global _current_event_id
     _current_event_id = event_id
+    print(f"[DEBUG] Setting current_event_id to: {event_id}")
     await settings_coll.update_one(
         {"_id": "current_event"},
         {"$set": {"event_id": event_id}},
