@@ -316,7 +316,7 @@ export default function AdminPage() {
                 )}
               </div>
               {isAdmin && createdEvent && (
-                <div className="bg-green-100 border border-green-300 rounded p-3 mb-4">
+                <div className=" border border-green-300 rounded p-3 mb-4">
                   <div className="font-medium">Event Created!</div>
                   {createdEvent.code && (
                     <div>Event Code: <span className="font-mono">{createdEvent.code}</span></div>
