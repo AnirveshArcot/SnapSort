@@ -1,16 +1,17 @@
-# api/event.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from typing import List
-
 from grpc import Status
-import numpy as np
 from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
 from core.config import ALLOWED_EXTENSIONS, IMAGE_STORAGE_PATH, CACHE_DIR, get_current_event_id
 from services.image_processing import decode_base64_image, get_cached_compressed_image, cache_compressed_image
 from api.auth import get_me as get_current_user
-import os, base64, json
+import os
+import base64
+import json
+import aiofiles
 import cv2
+import numpy as np
 
 router = APIRouter()
 
@@ -23,12 +24,7 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 
-    # Determine event folder based on role
-    if current_user.role == "editor":
-        event_folder = os.path.join(IMAGE_STORAGE_PATH, f"{event_id}_edited")
-    else:
-        event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
-
+    event_folder = os.path.join(IMAGE_STORAGE_PATH, f"{event_id}_edited" if current_user.role == "editor" else event_id)
     os.makedirs(event_folder, exist_ok=True)
     uploaded = []
 
@@ -37,26 +33,22 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
         try:
             image_data = base64.b64decode(payload or img.base64)
         except Exception as e:
-            raise HTTPException(
-                status_code=Status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid base64 image for file {img.filename}: {e}"
-            )
+            raise HTTPException(status_code=Status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid base64 image for file {img.filename}: {e}")
 
         base_name, ext = os.path.splitext(img.filename)
 
         if current_user.role == "editor":
-            base_name = f"{base_name}_edited"
-            filename = f"{base_name}{ext}"
+            filename = f"{base_name}_edited{ext}"
             file_path = os.path.join(event_folder, filename)
-            with open(file_path, "wb") as fout:
-                fout.write(image_data)
+            async with aiofiles.open(file_path, "wb") as fout:
+                await fout.write(image_data)
             uploaded.append(filename)
             continue
 
         original_filename = f"{base_name}_original{ext}"
         original_path = os.path.join(event_folder, original_filename)
-        with open(original_path, "wb") as fout:
-            fout.write(image_data)
+        async with aiofiles.open(original_path, "wb") as fout:
+            await fout.write(image_data)
         uploaded.append(original_filename)
 
         try:
@@ -65,10 +57,10 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
             if img_np is None:
                 raise ValueError("Decoded image is None")
 
+            # Preview
             preview = cv2.resize(img_np, (0, 0), fx=0.25, fy=0.25)
             preview_filename = f"{base_name}_preview.jpeg"
             preview_path = os.path.join(event_folder, preview_filename)
-
             quality = 60
             while True:
                 success, buffer = cv2.imencode(".jpeg", preview, [cv2.IMWRITE_JPEG_QUALITY, quality])
@@ -77,13 +69,13 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
                 if len(buffer) <= 50 * 1024 or quality <= 30:
                     break
                 quality -= 5
-
-            with open(preview_path, "wb") as fout:
-                fout.write(buffer)
+            async with aiofiles.open(preview_path, "wb") as fout:
+                await fout.write(buffer.tobytes())
             uploaded.append(preview_filename)
+
+            # Compressed
             compressed_filename = f"{base_name}_compressed.jpeg"
             compressed_path = os.path.join(event_folder, compressed_filename)
-
             quality = 80
             while True:
                 success, buffer = cv2.imencode(".jpeg", img_np, [cv2.IMWRITE_JPEG_QUALITY, quality])
@@ -92,19 +84,14 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
                 if len(buffer) <= 512 * 1024 or quality <= 40:
                     break
                 quality -= 5
-
-            with open(compressed_path, "wb") as fout:
-                fout.write(buffer)
+            async with aiofiles.open(compressed_path, "wb") as fout:
+                await fout.write(buffer.tobytes())
             uploaded.append(compressed_filename)
 
         except Exception as e:
-            raise HTTPException(
-                status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to process image {img.filename}: {e}"
-            )
+            raise HTTPException(status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process image {img.filename}: {e}")
 
     return UploadImagesResponse(uploaded=uploaded)
-
 
 
 @router.get("/download")
@@ -114,34 +101,29 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
         raise HTTPException(status_code=500, detail="Current event not set")
 
     folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
-
-    if "_preview" in filename:
-        base_name = filename.replace("_preview", "").rsplit(".", 1)[0]
-    else:
-        base_name = os.path.splitext(filename)[0]
+    base_name = filename.replace("_preview", "").rsplit(".", 1)[0] if "_preview" in filename else os.path.splitext(filename)[0]
 
     if current_user.role == "editor":
         for ext in ALLOWED_EXTENSIONS:
-            original_filename = f"{base_name}_original{ext}"
-            file_path = os.path.join(folder, original_filename)
+            file_path = os.path.join(folder, f"{base_name}_original{ext}")
             if os.path.exists(file_path):
-                return FileResponse(path=file_path, filename=original_filename, media_type="application/octet-stream")
+                return FileResponse(path=file_path, filename=os.path.basename(file_path), media_type="application/octet-stream")
         raise HTTPException(status_code=404, detail="File not found")
-    else:
-        compressed_filename = f"{base_name}_compressed.jpeg"
-        cache_path = os.path.join(CACHE_DIR, compressed_filename)
 
-        cached_img = get_cached_compressed_image(compressed_filename)
-        if cached_img is not None and os.path.exists(cache_path):
-            return FileResponse(path=cache_path, filename=compressed_filename, media_type="application/octet-stream")
+    compressed_filename = f"{base_name}_compressed.jpeg"
+    cache_path = os.path.join(CACHE_DIR, compressed_filename)
 
-        file_path = os.path.join(folder, compressed_filename)
-        if os.path.exists(file_path):
-            img = cv2.imread(file_path)
-            cache_compressed_image(compressed_filename, img)
-            return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
+    cached_img = get_cached_compressed_image(compressed_filename)
+    if cached_img is not None and os.path.exists(cache_path):
+        return FileResponse(path=cache_path, filename=compressed_filename, media_type="application/octet-stream")
 
-        raise HTTPException(status_code=404, detail="File not found")
+    file_path = os.path.join(folder, compressed_filename)
+    if os.path.exists(file_path):
+        img = cv2.imread(file_path)
+        cache_compressed_image(compressed_filename, img)
+        return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
+
+    raise HTTPException(status_code=404, detail="File not found")
 
 
 @router.get("/get-images", response_model=List[dict])
@@ -161,12 +143,9 @@ async def get_images(current_user: UserOut = Depends(get_current_user)):
             if f.lower().endswith("_preview.jpeg"):
                 file_path = os.path.join(event_folder, f)
                 try:
-                    with open(file_path, "rb") as image_file:
-                        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                        images.append({
-                            "name": f,
-                            "base64": f"data:image/jpeg;base64,{encoded_string}"
-                        })
+                    async with aiofiles.open(file_path, "rb") as image_file:
+                        encoded_string = base64.b64encode(await image_file.read()).decode("utf-8")
+                        images.append({"name": f, "base64": f"data:image/jpeg;base64,{encoded_string}"})
                 except Exception:
                     continue
         return images
@@ -179,16 +158,16 @@ async def get_images(current_user: UserOut = Depends(get_current_user)):
         return images
 
     try:
-        with open(matches_path, "r") as f:
-            matches_data = json.load(f)
+        async with aiofiles.open(matches_path, "r") as f:
+            content = await f.read()
+            matches_data = json.loads(content)
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="Invalid matches.json format")
 
     matched_files = matches_data.get("matches", {}).get(current_user.id, [])
 
-    for idx, filename in enumerate(matched_files):
-        base, ext = os.path.splitext(filename)
-        base = base.replace("_compressed", "")
+    for filename in matched_files:
+        base = os.path.splitext(filename.replace("_compressed", ""))[0]
         preview_filename = f"{base}_preview.jpeg"
         preview_path = os.path.join(event_folder, preview_filename)
 
@@ -196,12 +175,9 @@ async def get_images(current_user: UserOut = Depends(get_current_user)):
             continue
 
         try:
-            with open(preview_path, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                images.append({
-                    "name": preview_filename,
-                    "base64": f"data:image/jpeg;base64,{encoded_string}"
-                })
+            async with aiofiles.open(preview_path, "rb") as image_file:
+                encoded_string = base64.b64encode(await image_file.read()).decode("utf-8")
+                images.append({"name": preview_filename, "base64": f"data:image/jpeg;base64,{encoded_string}"})
         except Exception:
             continue
 
