@@ -20,7 +20,7 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
     if current_user.role not in ["photographer", "editor", "admin"]:
         raise HTTPException(status_code=403, detail="Not allowed to upload images")
 
-    event_id = get_current_event_id()
+    event_id = await get_current_event_id()
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 
@@ -96,7 +96,7 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
 
 @router.get("/download")
 async def download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
-    event_id = get_current_event_id()
+    event_id = await get_current_event_id()
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 
@@ -128,7 +128,7 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
 
 @router.get("/get-images", response_model=List[dict])
 async def get_images(current_user: UserOut = Depends(get_current_user)):
-    event_id = get_current_event_id()
+    event_id = await get_current_event_id()
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 

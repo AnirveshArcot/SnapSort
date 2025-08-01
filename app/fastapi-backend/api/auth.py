@@ -77,7 +77,7 @@ async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
         name=user["name"],
         email=user["email"],
         image=user.get("image"),
-        joined_event=get_current_event_id(),
+        joined_event= await get_current_event_id(),
         role=user.get("role", "user")
     )
 
@@ -107,7 +107,7 @@ async def register_user(user: RegisterUser):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Image processing failed: {e}")
 
-    current_event = get_current_event_id()
+    current_event = await get_current_event_id()
 
     user_data = {
         "name": user.name,
