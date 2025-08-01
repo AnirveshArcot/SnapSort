@@ -103,13 +103,13 @@ def list_event_files(event_id: str):
     ]
     return {"event_id": event_id, "files": files}
 
-def run_face_matching():
+async def run_face_matching():
     try:
-        current_event = get_current_event_id()
+        current_event = await get_current_event_id()
         if not current_event:
             raise ValueError("No current event ID set")
 
-        faiss_index = get_faiss_index()
+        faiss_index = await get_faiss_index()
         if faiss_index is None:
             raise ValueError("FAISS index not loaded for current event")
 
