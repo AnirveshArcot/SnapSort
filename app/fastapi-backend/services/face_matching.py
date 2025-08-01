@@ -145,7 +145,7 @@ async def run_face_matching():
 
         process = psutil.Process()
 
-        for file_name in compressed_files:
+        for file_name in tqdm(compressed_files, desc="Matching Faces"):
             base, ext = os.path.splitext(file_name)
             if not base.endswith("_compressed"):
                 continue
