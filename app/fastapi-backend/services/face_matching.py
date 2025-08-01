@@ -105,23 +105,32 @@ def list_event_files(event_id: str):
 
 async def run_face_matching():
     try:
+        print("[INFO] Starting face matching task...")
+
         current_event = await get_current_event_id()
+        print(f"[DEBUG] Current event ID: {current_event}")
         if not current_event:
             raise ValueError("No current event ID set")
 
         faiss_index = await get_faiss_index()
         if faiss_index is None:
             raise ValueError("FAISS index not loaded for current event")
+        print("[INFO] FAISS index loaded successfully.")
 
         image_files = list_event_files(current_event)
+        print(f"[DEBUG] Total files found: {len(image_files['files'])}")
+
         compressed_files = [
             file_name for file_name in image_files["files"]
             if os.path.splitext(file_name)[0].endswith("_compressed")
         ]
+        print(f"[INFO] Compressed files to process: {len(compressed_files)}")
 
         matches = {}
 
         all_records = list(feature_vector_collection.find({"event_id": current_event}))
+        print(f"[DEBUG] Feature vectors loaded: {len(all_records)}")
+
         if not all_records:
             print("No feature vectors found.")
             settings_coll.update_one(
@@ -132,7 +141,12 @@ async def run_face_matching():
             return
 
         id_map_list = list(user_id_map.find({}, {"int_id": 1, "_id": 1}))
-        int_id_to_obj = {record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record}
+        print(f"[DEBUG] ID map records loaded: {len(id_map_list)}")
+
+        int_id_to_obj = {
+            record["int_id"]: record["_id"]
+            for record in id_map_list if "int_id" in record
+        }
 
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             base, ext = os.path.splitext(file_name)
@@ -141,6 +155,7 @@ async def run_face_matching():
 
             try:
                 image_path = f"{current_event}/{file_name}"
+                print(f"[INFO] Processing file: {image_path}")
                 image = fetch_image_from_cdn(image_path)
 
                 file = {"image": image, "file_key": file_name}
@@ -156,10 +171,15 @@ async def run_face_matching():
                             if fk not in matches[person_id]:
                                 matches[person_id].append(fk)
 
+                    print(f"[DEBUG] Matches found in {file_name}: {result}")
+                else:
+                    print(f"[DEBUG] No matches found for {file_name}")
+
             except Exception as e:
-                print(f"Error processing {file_name}: {e}")
+                print(f"[ERROR] Error processing {file_name}: {e}")
 
         matches_json = {"matches": matches}
+        print(f"[INFO] Uploading matches.json to CDN: {current_event}/matches.json")
         upload_to_cdn(f"{current_event}/matches.json", matches_json)
 
         settings_coll.update_one(
@@ -167,11 +187,12 @@ async def run_face_matching():
             {"$set": {"status": "free"}},
             upsert=True
         )
+        print("[INFO] Face matching task completed successfully.")
 
     except Exception as e:
+        print(f"[FATAL] Error in background task: {e}")
         settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "error", "error_detail": str(e)}},
             upsert=True
         )
-        print(f"Error in background task: {e}")
