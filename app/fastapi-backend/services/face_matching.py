@@ -16,13 +16,14 @@ from core.config import (
     get_current_event_id,
     get_faiss_index
 )
-from deepface.DeepFace import represent
+from deepface import DeepFace
 from ultralytics import YOLO
 
 model = YOLO("./model.pt")
-
+feature_model= DeepFace.build_model("VGG-Face")
 def extract_features_func(face_image):
-    result = represent(face_image, model_name="VGG-Face", enforce_detection=False, align=True)
+    result = DeepFace.represent(face_image, model_name="VGG-Face", model=model,
+                                enforce_detection=False, align=True)
     return result[0]["embedding"]
 
 def localize_faces_func(image):
