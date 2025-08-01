@@ -435,7 +435,7 @@ export default function AdminPage() {
                     <div className="overflow-x-auto">
                       <table className="min-w-full border text-sm">
                         <thead>
-                          <tr className="bg-gray-100">
+                          <tr className="">
                             <th className="border px-2 py-1">Name</th>
                             <th className="border px-2 py-1">Email</th>
                             <th className="border px-2 py-1">Role</th>
