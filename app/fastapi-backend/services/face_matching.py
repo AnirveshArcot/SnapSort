@@ -23,12 +23,12 @@ from deepface import DeepFace
 from ultralytics import YOLO
 
 model = YOLO("./model.pt")
-sface_model = DeepFace.build_model("SFace")
+arcface_model = DeepFace.build_model("ArcFace")
 
 def extract_features_func(face_image):
     result = DeepFace.represent(
         face_image,
-        model_name="SFace",
+        model_name="ArcFace",
         enforce_detection=False,
         align=True
     )
@@ -108,8 +108,6 @@ def list_event_files(event_id: str):
 
 async def run_face_matching():
     try:
-        print("[INFO] Starting face matching task...")
-
         current_event = await get_current_event_id()
         if not current_event:
             raise ValueError("No current event ID set")
@@ -123,11 +121,9 @@ async def run_face_matching():
             file_name for file_name in image_files["files"]
             if os.path.splitext(file_name)[0].endswith("_compressed")
         ]
-        print(f"[INFO] Total compressed files to process: {len(compressed_files)}")
 
         matches = {}
 
-        # Load only necessary data from DB
         all_records_cursor = feature_vector_collection.find({"event_id": current_event})
         all_records = await all_records_cursor.to_list(length=None)
 
@@ -149,24 +145,17 @@ async def run_face_matching():
 
         process = psutil.Process()
 
-        for idx, file_name in enumerate(tqdm(compressed_files, desc="Matching Faces")):
+        for file_name in compressed_files:
             base, ext = os.path.splitext(file_name)
             if not base.endswith("_compressed"):
                 continue
 
             try:
-                print(f"[INFO] Processing file {idx + 1}/{len(compressed_files)}: {file_name}")
-                print(f"[DEBUG] Memory Usage: {process.memory_info().rss / (1024 ** 2):.2f} MB")
-
                 image_path = f"{current_event}/{file_name}"
                 image = fetch_image_from_cdn(image_path)
 
                 if image is None:
-                    print(f"[WARN] Image not found or invalid: {file_name}")
                     continue
-
-                # Resize if needed to save memory
-                # image = cv2.resize(image, (512, 512))
 
                 file = {"image": image, "file_key": file_name}
                 result = process_image(file, all_records, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD)
@@ -181,29 +170,22 @@ async def run_face_matching():
                             if fk not in matches[person_id]:
                                 matches[person_id].append(fk)
 
-                # Explicit cleanup
                 del image, file, result
                 gc.collect()
 
-            except Exception as e:
-                print(f"[ERROR] Failed to process {file_name}: {e}")
-                traceback.print_exc()
+            except Exception:
                 continue
 
         matches_json = {"matches": matches}
         upload_to_cdn(f"{current_event}/matches.json", matches_json)
-        print("[INFO] Uploaded matches to CDN.")
 
         await settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "free"}},
             upsert=True
         )
-        print("[INFO] Face matching completed successfully.")
 
     except Exception as e:
-        print(f"[FATAL] Exception in run_face_matching: {e}")
-        traceback.print_exc()
         await settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "error", "error_detail": str(e)}},
