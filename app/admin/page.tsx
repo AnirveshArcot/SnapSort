@@ -417,7 +417,7 @@ export default function AdminPage() {
                     </Button>
                   </form>
                   {createdUser && (
-                    <div className="mt-4 bg-green-100 border border-green-300 rounded p-3">
+                    <div className="mt-4 border border-green-300 rounded p-3">
                       <div className="font-medium">User Created!</div>
                       <div>Email: <span className="font-mono">{createdUser.email}</span></div>
                       <div>Password: <span className="font-mono">{createdUser.password}</span></div>
