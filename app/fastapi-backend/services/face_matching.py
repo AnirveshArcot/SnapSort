@@ -128,7 +128,8 @@ async def run_face_matching():
 
         matches = {}
 
-        all_records = list(await feature_vector_collection.find({"event_id": current_event}))
+        all_records_cursor = feature_vector_collection.find({"event_id": current_event})
+        all_records = await all_records_cursor.to_list(length=None)
         print(f"[DEBUG] Feature vectors loaded: {len(all_records)}")
 
         if not all_records:
@@ -140,7 +141,8 @@ async def run_face_matching():
             )
             return
 
-        id_map_list = list(await user_id_map.find({}, {"int_id": 1, "_id": 1}))
+        map_cursor = user_id_map.find({}, {"int_id": 1, "_id": 1})
+        id_map_list = await map_cursor.to_list(length=None)
         print(f"[DEBUG] ID map records loaded: {len(id_map_list)}")
 
         int_id_to_obj = {
