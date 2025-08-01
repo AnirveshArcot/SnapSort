@@ -26,7 +26,6 @@ def extract_features_func(face_image):
     result = DeepFace.represent(
         face_image,
         model_name="ArcFace",
-        model=arcface_model,
         enforce_detection=False,
         align=True
     )
