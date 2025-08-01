@@ -128,7 +128,7 @@ async def run_face_matching():
 
         matches = {}
 
-        all_records = list(feature_vector_collection.find({"event_id": current_event}))
+        all_records = list(await feature_vector_collection.find({"event_id": current_event}))
         print(f"[DEBUG] Feature vectors loaded: {len(all_records)}")
 
         if not all_records:
