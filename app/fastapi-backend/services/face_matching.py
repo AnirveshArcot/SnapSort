@@ -47,15 +47,26 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
     try:
         image = file["image"]
         file_key = file["file_key"]
+
         bounding_boxes = localize_faces_func(image)
         if not bounding_boxes:
             return {}
 
         vecs = []
+
         for (x1, y1, x2, y2) in bounding_boxes:
             face_img = image[y1:y2, x1:x2]
-            feat = extract_features_func(face_img)
-            vecs.append(np.array(feat, dtype='float32'))
+
+            try:
+                feat = extract_features_func(face_img)
+                if feat is None:
+                    continue
+                vecs.append(np.array(feat, dtype='float32'))
+            except Exception as fe:
+                continue  # skip this face if feature extraction fails
+
+        if not vecs:
+            return {}
 
         batch = np.stack(vecs, axis=0)
         faiss.normalize_L2(batch)
@@ -63,13 +74,15 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
 
         matches = {}
         for i, box in enumerate(bounding_boxes):
+            if i >= len(similarities):  # in case some faces were skipped
+                continue
+
             best_score = float(similarities[i, 0])
             best_int_id = int(indices[i, 0])
 
             if best_score >= similarity_threshold:
-                try:
-                    obj_id = int_id_map[best_int_id]
-                except KeyError:
+                obj_id = int_id_map.get(best_int_id)
+                if obj_id is None:
                     continue
 
                 pid = str(obj_id)
@@ -78,10 +91,18 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
                     "bounding_box": box,
                     "similarity": best_score
                 })
+
+        # Explicit memory cleanup
+        del image, file, vecs, batch, similarities, indices
+        gc.collect()
+
         return matches
+
     except Exception as e:
-        print(f"Error processing image : {e}")
+        print(f"Error processing image: {e}")
+        gc.collect()
         return None
+
 
 def upload_to_cdn(file_name, json_data):
     file_path = os.path.join(IMAGE_STORAGE_PATH, file_name)
