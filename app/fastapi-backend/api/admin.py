@@ -65,7 +65,7 @@ async def create_user(req: CreateUserRequest, admin: UserOut = Depends(get_curre
         "email": email,
         "password": hashed_password,
         "role": req.role,
-        "joined_event": config.get_current_event_id(),
+        "joined_event": await config.get_current_event_id(),
         "image": ""
     }
     await config.users_collection.insert_one(user_data)
