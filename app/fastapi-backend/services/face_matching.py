@@ -1,5 +1,8 @@
 # services/face_matching.py
+import gc
+import traceback
 from fastapi import HTTPException
+import psutil
 from services.image_processing import fetch_image_from_cdn
 from tqdm import tqdm
 import os
