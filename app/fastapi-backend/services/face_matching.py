@@ -53,14 +53,12 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
             return {}
 
         vecs = []
-        print("Bounding boxes found ")
 
         for (x1, y1, x2, y2) in bounding_boxes:
             face_img = image[y1:y2, x1:x2]
 
             try:
                 feat = extract_features_func(face_img)
-                print("feat found")
                 if feat is None:
                     continue
                 vecs.append(np.array(feat, dtype='float32'))
