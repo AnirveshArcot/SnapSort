@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import os
 from fastapi import HTTPException
-
+from core.config import ALLOWED_EXTENSIONS, IMAGE_STORAGE_PATH, CACHE_DIR
 import json
 
 def decode_base64_image(base64_string):
@@ -14,7 +14,6 @@ def decode_base64_image(base64_string):
     return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
 def fetch_image_from_cdn(image_name: str):
-    from core.config import  IMAGE_STORAGE_PATH
     path = os.path.join(IMAGE_STORAGE_PATH, image_name)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image not found")

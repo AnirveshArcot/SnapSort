@@ -9,6 +9,8 @@ from tqdm import tqdm
 from fastapi import HTTPException
 
 from services.image_processing import fetch_image_from_cdn
+from services.model_loader import get_yolo_model, get_arcface_model
+
 from core.config import (
     settings_coll,
     feature_vector_collection,
@@ -20,42 +22,20 @@ from core.config import (
     get_faiss_index
 )
 
-from deepface import DeepFace
-from ultralytics import YOLO
-
-# Global models
-model = None
-arcface_model = None
-
-def load_models():
-    global model, arcface_model
-    if model is None:
-        model = YOLO("./yolov8n_face_trained.pt")
-    if arcface_model is None:
-        arcface_model = DeepFace.build_model("SFace")
-
-def unload_models():
-    global model, arcface_model
-    try:
-        import torch
-        if model is not None or arcface_model is not None:
-            torch.cuda.empty_cache()
-        model = None
-        arcface_model = None
-    except ImportError:
-        pass
 
 def extract_features_func(face_image):
+    from deepface import DeepFace
     result = DeepFace.represent(
         face_image,
         model_name="SFace",
         enforce_detection=False,
         align=True,
-        model=arcface_model
+        model=get_arcface_model()
     )
     return result[0]["embedding"]
 
 def localize_faces_func(image):
+    model = get_yolo_model()
     results = model.predict(source=image, conf=0.25, verbose=False)
     face_boxes = []
     for box in results[0].boxes.xyxy:
@@ -108,7 +88,6 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
 
         del image, file, vecs, batch, similarities, indices
         gc.collect()
-
         return matches
 
     except Exception as e:
