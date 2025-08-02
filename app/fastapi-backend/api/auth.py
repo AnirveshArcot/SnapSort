@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from db.models import RegisterUser, UserOut
 from core.config import (
     ALGORITHM, SECRET_KEY, users_collection, ADMIN_MAIL, ADMIN_PASSWORD,
-    feature_vector_collection, get_current_event_id, get_faiss_index, set_faiss_index, dimension, user_id_map
+    feature_vector_collection, get_current_event_id, get_faiss_index, set_faiss_index, dimension, user_id_map,settings_coll
 )
 from core.security import create_access_token
 from services.image_processing import decode_base64_image
@@ -79,6 +79,10 @@ async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
 
 @router.post("/register", response_model=UserOut)
 async def register_user(user: RegisterUser):
+    current_settings = await settings_coll.find_one({"_id": "current_event"})
+    current_status = current_settings.get("status") if current_settings else "free"
+    if current_status == "processing":
+        raise HTTPException(status_code=409, detail="Face matching in progress. Please try again later.")
     existing_user = await users_collection.find_one({"email": user.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered.")
@@ -93,12 +97,14 @@ async def register_user(user: RegisterUser):
     if len(box) > 1:
         raise HTTPException(status_code=400, detail="Multiple faces detected. Upload an image with only one face.")
 
+
     import cv2, base64
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]
     success, encoded_img = cv2.imencode('.jpg', img, encode_param)
     if not success:
         raise HTTPException(status_code=500, detail="Image compression failed")
     compressed_base64 = base64.b64encode(encoded_img).decode()
+
 
     hashed_password = await asyncio.to_thread(
         lambda: bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
@@ -112,14 +118,14 @@ async def register_user(user: RegisterUser):
         "image": compressed_base64,
         "joined_event": current_event,
         "role": "user",
-        "password" : hashed_password,
+        "password": hashed_password,
     }
 
     result = await users_collection.insert_one(user_data)
     mongo_id = result.inserted_id
+
     async def process_vector():
         try:
-            # Re-decode original image to extract vector (higher quality)
             fullres_img = decode_base64_image(user.image)
             face_box = await asyncio.to_thread(localize_faces_func, fullres_img)
             x, y, w, h = face_box[0]
@@ -148,7 +154,9 @@ async def register_user(user: RegisterUser):
             print(f"[ERROR] Background feature extraction failed: {e}")
 
     asyncio.create_task(process_vector())
+
     return UserOut(id=str(mongo_id), **user_data)
+
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
