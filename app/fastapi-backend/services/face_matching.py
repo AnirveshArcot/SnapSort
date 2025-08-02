@@ -48,14 +48,16 @@ def localize_faces_func(image):
     try:
         model = get_yolo_model()
         results = model.predict(source=image, conf=0.50, verbose=False)
-        face_boxes = []
-        for box in results[0].boxes.xyxy:
-            x1, y1, x2, y2 = map(int, box)
-            face_boxes.append((x1, y1, x2, y2))
+        face_boxes = [
+            tuple(map(int, box)) for box in results[0].boxes.xyxy
+        ]
+        del model
+        gc.collect()
         return face_boxes
     except Exception as e:
         print(f"Error localizing faces: {e}")
         return []
+
 
 
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
