@@ -20,6 +20,7 @@ import {
   createNewEvent
 } from "@/lib/api";
 
+// User interface
 interface User {
   id: string;
   name: string;
@@ -30,14 +31,18 @@ interface User {
   role: string;
 }
 
+// AdminPage component
 export default function AdminPage() {
   const router = useRouter();
+
+  // State setup
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [imageList, setImageList] = useState<{ name: string; base64: string }[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  const [imageList, setImageList] = useState<{ name: string; base64: string }[]>([]);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -61,6 +66,7 @@ export default function AdminPage() {
   const isPhotographer = user?.role === "photographer";
   const isEditor = user?.role === "editor";
 
+  // Fetch Images with pagination
   const fetchImages = useCallback(async (reset = false) => {
     if (fetching || (!reset && !hasMore)) return;
     setFetching(true);
@@ -76,12 +82,13 @@ export default function AdminPage() {
       }
       setHasMore(newImages.length === 20);
     } catch (err) {
-      console.error("Failed to fetch images:", err);
+      console.error("Error fetching images:", err);
     } finally {
       setFetching(false);
     }
   }, [fetching, hasMore, page]);
 
+  // Infinite scroll handler
   useEffect(() => {
     const handleScroll = () => {
       if (
@@ -93,28 +100,26 @@ export default function AdminPage() {
         fetchImages();
       }
     };
-
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, [fetchImages, hasMore, fetching]);
 
+  // Initial Auth & Data Load
   useEffect(() => {
     (async () => {
       const sessionUser = await getSession();
-      if (sessionUser) {
-        if (!["admin", "editor", "photographer"].includes(sessionUser.role)) {
-          router.push("/");
-          return;
-        }
-        setUser(sessionUser);
-        setChecking(false);
-        if (sessionUser.role === "admin") await fetchUserList();
-        if (["admin", "editor"].includes(sessionUser.role)) await fetchImages(true);
-      } else {
+      if (!sessionUser || !["admin", "editor", "photographer"].includes(sessionUser.role)) {
         router.push("/login");
+        return;
       }
+      setUser(sessionUser);
+      setChecking(false);
+
+      if (sessionUser.role === "admin") await fetchUserList();
+      if (["admin", "editor"].includes(sessionUser.role)) await fetchImages(true);
     })();
   }, [router, fetchImages]);
+
 
   const handleUpload = async () => {
     setUploading(true);
