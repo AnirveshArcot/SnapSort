@@ -38,7 +38,7 @@ def main():
     print(f"YOLO detected {len(boxes)} faces")
     print_ram("After YOLO inference")
 
-    if boxes:
+    if len(boxes) > 0:
         x1, y1, x2, y2 = map(int, boxes[0])
         face_crop = img[y1:y2, x1:x2]
 
@@ -51,6 +51,7 @@ def main():
         )
         print(f"ArcFace embedding length: {len(embedding[0]['embedding'])}")
         print_ram("After ArcFace inference")
+
 
     del yolo, arcface, img, boxes, results
     gc.collect()
