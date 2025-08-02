@@ -146,10 +146,6 @@ async def download_image(
     raise HTTPException(status_code=404, detail="File not found")
 
 
-from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import List
-import os, json, base64, asyncio
-import aiofiles
 
 @router.get("/get-images")
 async def get_images(
