@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { UserNav } from "@/components/user-nav";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ export default function AdminPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [fetching, setFetching] = useState(false);
 
   const [newUserName, setNewUserName] = useState("");
   const [newUserRole, setNewUserRole] = useState("photographer");
@@ -60,7 +61,9 @@ export default function AdminPage() {
   const isPhotographer = user?.role === "photographer";
   const isEditor = user?.role === "editor";
 
-  const fetchImages = async (reset = false) => {
+  const fetchImages = useCallback(async (reset = false) => {
+    if (fetching || (!reset && !hasMore)) return;
+    setFetching(true);
     try {
       const currentPage = reset ? 0 : page;
       const newImages = await getImages(currentPage * 20, 20);
@@ -74,15 +77,18 @@ export default function AdminPage() {
       setHasMore(newImages.length === 20);
     } catch (err) {
       console.error("Failed to fetch images:", err);
+    } finally {
+      setFetching(false);
     }
-  };
+  }, [fetching, hasMore, page]);
 
   useEffect(() => {
     const handleScroll = () => {
       if (
         window.innerHeight + document.documentElement.scrollTop >=
           document.documentElement.offsetHeight - 100 &&
-        hasMore
+        hasMore &&
+        !fetching
       ) {
         fetchImages();
       }
@@ -90,7 +96,7 @@ export default function AdminPage() {
 
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [hasMore]);
+  }, [fetchImages, hasMore, fetching]);
 
   useEffect(() => {
     (async () => {
@@ -108,7 +114,7 @@ export default function AdminPage() {
         router.push("/login");
       }
     })();
-  }, [router]);
+  }, [router, fetchImages]);
 
   const handleUpload = async () => {
     setUploading(true);
