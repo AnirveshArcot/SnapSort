@@ -193,8 +193,8 @@ async def get_images(
                 images.append({"name": f, "base64": encoded})
         return {"images": images, "total_count": total_count}
 
-    # Photographer: show only matched previews
-    if current_user.role == "photographer":
+    # User: show only matched previews
+    if current_user.role == "user":
         matches_path = os.path.join(event_folder, "matches.json")
         if not await file_exists(matches_path):
             return {"images": [], "total_count": 0}
