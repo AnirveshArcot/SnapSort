@@ -9,8 +9,6 @@ from tqdm import tqdm
 from fastapi import HTTPException
 
 from services.image_processing import fetch_image_from_cdn
-from services.model_loader import get_yolo_model, get_model_status
-
 from core.config import (
     settings_coll,
     feature_vector_collection,
@@ -19,15 +17,26 @@ from core.config import (
     ALLOWED_EXTENSIONS,
     SIMILARITY_THRESHOLD,
     get_current_event_id,
-    get_faiss_index
+    get_faiss_index,
 )
+
+
+def get_yolo_model():
+    from ultralytics import YOLO
+    if not hasattr(get_yolo_model, "_model"):
+        get_yolo_model._model = YOLO("./yolov8n_face_trained.pt")
+    return get_yolo_model._model
 
 
 def extract_features_func(face_image):
     from deepface import DeepFace
+    if not hasattr(extract_features_func, "_model"):
+        extract_features_func._model = DeepFace.build_model("SFace")
+
     try:
         result = DeepFace.represent(
             face_image,
+            model=extract_features_func._model,
             model_name="SFace",
             enforce_detection=False,
             align=True,
@@ -36,6 +45,7 @@ def extract_features_func(face_image):
     except Exception as e:
         print(f"Error extracting features: {e}")
         return None
+
 
 def localize_faces_func(image):
     try:
@@ -49,6 +59,7 @@ def localize_faces_func(image):
     except Exception as e:
         print(f"Error localizing faces: {e}")
         return []
+
 
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
     try:
@@ -93,7 +104,6 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
                         "similarity": best_score
                     })
 
-        # Explicitly delete large objects to free memory
         del image, file, vecs, batch, similarities, indices
         gc.collect()
         return matches
@@ -103,6 +113,7 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         gc.collect()
         return None
 
+
 def upload_to_cdn(file_name, json_data):
     file_path = os.path.join(IMAGE_STORAGE_PATH, file_name)
     try:
@@ -111,6 +122,7 @@ def upload_to_cdn(file_name, json_data):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to save JSON file: {str(e)}")
     return {"url": f"local://{file_path}"}
+
 
 def list_event_files(event_id: str):
     event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
@@ -123,6 +135,7 @@ def list_event_files(event_id: str):
         and fname.lower().endswith(ALLOWED_EXTENSIONS)
     ]
     return {"event_id": event_id, "files": files}
+
 
 async def run_face_matching():
     try:
@@ -161,9 +174,6 @@ async def run_face_matching():
             for record in id_map_list if "int_id" in record
         }
 
-        model_status = get_model_status()
-        print(f"Model status before processing: {model_status}")
-
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             try:
                 image_path = f"{current_event}/{file_name}"
@@ -190,8 +200,6 @@ async def run_face_matching():
 
         matches_json = {"matches": matches}
         upload_to_cdn(f"{current_event}/matches.json", matches_json)
-        model_status_after = get_model_status()
-        print(f"Model status after processing: {model_status_after}")
         await settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "free"}},
