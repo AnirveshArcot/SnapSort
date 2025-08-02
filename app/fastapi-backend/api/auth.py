@@ -111,7 +111,8 @@ async def register_user(user: RegisterUser):
         "email": user.email,
         "image": compressed_base64,
         "joined_event": current_event,
-        "role": "user"
+        "role": "user",
+        "password" : hashed_password,
     }
 
     result = await users_collection.insert_one(user_data)
