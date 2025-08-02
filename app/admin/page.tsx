@@ -6,7 +6,6 @@ import Link from "next/link";
 import { UserNav } from "@/components/user-nav";
 import { Button } from "@/components/ui/button";
 import { uploadImages, getImages, downloadImageBlob, createUserAsAdmin, getAllUsersForAdmin, deleteUserAsAdmin, getSession, matchFaces, createNewEvent } from "@/lib/api";
-import imageCompression from 'browser-image-compression';
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
@@ -94,21 +93,6 @@ export default function AdminPage() {
       reader.onerror = reject;
     });
 
-    const compressImage = async (file: File) => {
-      const options = {
-        maxSizeMB: 1,               // Max size in MB
-        maxWidthOrHeight: 1024,     // Resize large images
-        useWebWorker: true,
-      };
-    
-      try {
-        const compressedFile = await imageCompression(file, options);
-        return compressedFile;
-      } catch (error) {
-        console.error('Compression failed:', error);
-        return file;
-      }
-    };
 
     const handleUpload = async () => {
       setUploading(true);
@@ -121,13 +105,11 @@ export default function AdminPage() {
         for (let i = 0; i < selectedFiles.length; i += BATCH_SIZE) {
           const batch = selectedFiles.slice(i, i + BATCH_SIZE);
 
-          const compressedFiles = await Promise.all(batch.map(file => compressImage(file)));
-
           const base64Payload = await Promise.all(
-            compressedFiles.map(async (file, idx) => {
+            batch.map(async (file) => {
               const base64 = await convertToBase64(file);
               return {
-                filename: batch[idx].name, // original name
+                filename: file.name,
                 base64,
               };
             })
@@ -141,7 +123,6 @@ export default function AdminPage() {
 
         alert("All images uploaded successfully!");
         setSelectedFiles([]);
-        // Refresh images after upload if allowed
         if (isAdmin || isEditor) await fetchImages();
       } catch (err: any) {
         console.error(err);
@@ -151,6 +132,7 @@ export default function AdminPage() {
       setUploading(false);
       setUploadProgress(0);
     };
+
 
   // Remove handleCreateEvent and handleMatchFaces functions
 
