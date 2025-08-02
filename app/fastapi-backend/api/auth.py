@@ -17,12 +17,10 @@ from services.faiss_index import load_faiss_index, save_faiss_index
 
 router = APIRouter()
 
-
 def normalize_vectors(vectors):
     norms = np.linalg.norm(vectors, axis=1)
     normalized_vectors = vectors / np.maximum(norms[:, np.newaxis], 1e-10)
     return normalized_vectors.astype('float32')
-
 
 async def allocate_int_id_for(uid):
     mapping = await user_id_map.find_one({"_id": uid})
@@ -38,14 +36,12 @@ async def allocate_int_id_for(uid):
     await user_id_map.insert_one({"_id": uid, "int_id": new_seq})
     return new_seq
 
-
 async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
     if auth_token is None:
         raise credentials_exception
 
@@ -77,10 +73,9 @@ async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
         name=user["name"],
         email=user["email"],
         image=user.get("image"),
-        joined_event= await get_current_event_id(),
+        joined_event=await get_current_event_id(),
         role=user.get("role", "user")
     )
-
 
 @router.post("/register", response_model=UserOut)
 async def register_user(user: RegisterUser):
@@ -100,7 +95,7 @@ async def register_user(user: RegisterUser):
         box = await asyncio.to_thread(localize_faces_func, img)
         if not box:
             raise ValueError("No face detected")
-        if len(box)>1:
+        if len(box) > 1:
             raise ValueError("Too many faces detected")
 
         x, y, w, h = box[0]
@@ -143,12 +138,9 @@ async def register_user(user: RegisterUser):
     await asyncio.to_thread(
         lambda: faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
     )
-
     await asyncio.to_thread(save_faiss_index, faiss_index, current_event)
 
     return UserOut(id=str(mongo_id), **user_data)
-
-
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -170,13 +162,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     resp.set_cookie("auth_token", token, httponly=True, samesite="lax", secure=True, path="/")
     return resp
 
-
 @router.post("/logout")
 async def logout():
     resp = JSONResponse({"message": "Logged out"})
     resp.delete_cookie("auth_token", path="/")
     return resp
-
 
 @router.get("/me", response_model=UserOut)
 async def get_me(current_user: UserOut = Depends(get_current_user)):
