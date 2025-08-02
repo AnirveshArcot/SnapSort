@@ -27,7 +27,12 @@ export default function EventImagesPage() {
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [images, setImages] = useState<EventImage[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const [loadingImages, setLoadingImages] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const IMAGES_PER_PAGE = 20;
 
   const handleDownload = async (filename: string) => {
     try {
@@ -47,11 +52,34 @@ export default function EventImagesPage() {
     }
   };
 
+  const fetchImages = async (reset = false) => {
+    try {
+      const pageToFetch = reset ? 0 : page;
+      const res = await getImages(pageToFetch * IMAGES_PER_PAGE, IMAGES_PER_PAGE);
+      const newImages = Array.isArray(res) ? res : res.images || [];
+
+      if (reset) {
+        setImages(newImages);
+        setPage(1);
+      } else {
+        setImages((prev) => [...prev, ...newImages]);
+        setPage((prev) => prev + 1);
+      }
+
+      setHasMore(newImages.length === IMAGES_PER_PAGE);
+    } catch (err) {
+      console.error("Failed to fetch images:", err);
+      setHasMore(false);
+    } finally {
+      setLoadingImages(false);
+      setLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       const sessionUser = await getSession();
       if (sessionUser) {
-        // Redirect admins/editors/photographers to the admin page
         if (
           sessionUser.role === "admin" ||
           sessionUser.role === "photographer" ||
@@ -61,13 +89,7 @@ export default function EventImagesPage() {
           return;
         }
         setUser(sessionUser);
-        try {
-          const res = await getImages();
-          setImages(Array.isArray(res) ? res : res.images || []);
-        } catch (err) {
-          setImages([]);
-        }
-        setLoadingImages(false);
+        await fetchImages(true);
         setChecking(false);
       } else {
         router.push("/login");
@@ -109,9 +131,10 @@ export default function EventImagesPage() {
       </header>
 
       <h2 className="text-2xl font-semibold my-4 px-3 sm:px-10">Event Images</h2>
-      {loadingImages ? (
+
+      {loadingImages && images.length === 0 ? (
         <div className="flex items-center justify-center h-screen">
-          <p>Loading Images....</p>
+          <p>Loading Images...</p>
         </div>
       ) : images.length === 0 ? (
         <div className="text-center py-12 border rounded-lg mx-4 sm:mx-10">
@@ -120,7 +143,7 @@ export default function EventImagesPage() {
           </p>
         </div>
       ) : (
-        <div className="space-y-2 px-3 sm:px-10">
+        <div className="space-y-4 px-3 sm:px-10">
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {images.map((img) => (
               <div
@@ -133,14 +156,22 @@ export default function EventImagesPage() {
                   className="w-full h-48 object-cover"
                 />
                 <div className="p-2 flex justify-between items-center text-sm">
-                  <span className="truncate" title={img.name}>{img.name}</span>
-                  <Button onClick={() => handleDownload(img.name)}>
-                    Download
-                  </Button>
+                  <span className="truncate" title={img.name}>
+                    {img.name}
+                  </span>
+                  <Button onClick={() => handleDownload(img.name)}>Download</Button>
                 </div>
               </div>
             ))}
           </div>
+
+          {hasMore && (
+            <div className="text-center mt-4">
+              <Button onClick={() => { setLoadingMore(true); fetchImages(); }} disabled={loadingMore}>
+                {loadingMore ? "Loading..." : "Load More"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
