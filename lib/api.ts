@@ -73,7 +73,7 @@ export async function uploadImages(formData: FormData) {
 }
 
 
-export async function getImages(skip: number = 0, limit: number = 20) {
+export async function getImages(skip = 0, limit = 20) {
   return await fetchAPI(`/event/get-images?skip=${skip}&limit=${limit}`);
 }
 
