@@ -116,7 +116,7 @@ async def register_user(user: RegisterUser):
         "name": user.name,
         "email": user.email,
         "image": compressed_base64,
-        "joined_event": [current_event],
+        "joined_event": current_event,
         "role": "user"
     }
 
