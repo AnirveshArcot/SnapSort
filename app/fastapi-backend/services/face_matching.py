@@ -22,10 +22,11 @@ from core.config import (
 from deepface import DeepFace
 from ultralytics import YOLO
 
-model = YOLO("./yolov8n_face_trained.pt")
-arcface_model = DeepFace.build_model("SFace")
+
+
 
 def extract_features_func(face_image):
+    arcface_model = DeepFace.build_model("SFace")
     result = DeepFace.represent(
         face_image,
         model_name="SFace",
@@ -36,7 +37,7 @@ def extract_features_func(face_image):
 
 
 def localize_faces_func(image):
-    
+    model = YOLO("./yolov8n_face_trained.pt")
     results = model.predict(source=image, conf=0.25, verbose=False)
     face_boxes = []
     for box in results[0].boxes.xyxy:
