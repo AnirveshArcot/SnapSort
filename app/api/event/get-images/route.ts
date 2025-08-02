@@ -2,11 +2,20 @@ import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
   const cookie = req.headers.get("cookie") ?? "";
+
+  // Parse query params from the incoming request
+  const { searchParams } = new URL(req.url);
+  const skip = searchParams.get("skip") ?? "0";
+  const limit = searchParams.get("limit") ?? "20";
+
   let backendRes: Response;
   try {
-    backendRes = await fetch(`${process.env.BACKEND_URL}/event/get-images`, {
-      headers: { cookie },
-    });
+    backendRes = await fetch(
+      `${process.env.BACKEND_URL}/event/get-images?skip=${skip}&limit=${limit}`,
+      {
+        headers: { cookie },
+      }
+    );
   } catch (err) {
     return NextResponse.json(null);
   }
