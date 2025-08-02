@@ -4,7 +4,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status, Cookie
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
-
+from services.model_loader import load_models , unload_models
 from db.models import RegisterUser, UserOut
 from core.config import (
     ALGORITHM, SECRET_KEY, users_collection, ADMIN_MAIL, ADMIN_PASSWORD,
@@ -79,6 +79,7 @@ async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
 
 @router.post("/register", response_model=UserOut)
 async def register_user(user: RegisterUser):
+    load_models()
     current_settings = await settings_coll.find_one({"_id": "current_event"})
     current_status = current_settings.get("status") if current_settings else "free"
     if current_status == "processing":
@@ -154,7 +155,7 @@ async def register_user(user: RegisterUser):
             print(f"[ERROR] Background feature extraction failed: {e}")
 
     asyncio.create_task(process_vector())
-
+    unload_models
     return UserOut(id=str(mongo_id), **user_data)
 
 

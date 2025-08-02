@@ -121,8 +121,6 @@ async def set_faiss_index(index):
         save_faiss_index(index, current_event_id)
 
 async def lifespan(app):
-    # Load models at startup
-    load_models()
     print("Starting up application")
 
     current_event_id = await get_current_event_id()
@@ -142,4 +140,3 @@ async def lifespan(app):
     # Cleanup on shutdown
     print("Cleaning up application")
     unmount_sshfs()
-    unload_models()
