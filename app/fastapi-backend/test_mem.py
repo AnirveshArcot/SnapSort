@@ -47,7 +47,6 @@ def main():
             model_name="SFace",
             enforce_detection=False,
             align=True,
-            model=arcface
         )
         print(f"ArcFace embedding length: {len(embedding[0]['embedding'])}")
         print_ram("After ArcFace inference")
