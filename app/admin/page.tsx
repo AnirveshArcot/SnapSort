@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { uploadImages, getImages, downloadImageBlob, createUserAsAdmin, getAllUsersForAdmin, deleteUserAsAdmin, getSession, matchFaces, createNewEvent } from "@/lib/api";
 import { toast } from "sonner";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import pLimit from "p-limit";
 
 interface User {
   id: string;
@@ -41,6 +42,8 @@ export default function AdminPage() {
   const [createdEvent, setCreatedEvent] = useState<any>(null);
   // --- Tabs State ---
   const [activeTab, setActiveTab] = useState("event");
+  const BATCH_SIZE = 5;
+  const CONCURRENCY = 3;
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,35 +101,38 @@ export default function AdminPage() {
       setUploading(true);
       setUploadProgress(0);
 
+      const limit = pLimit(CONCURRENCY);
+
       try {
-        const BATCH_SIZE = 5;
-        const totalBatches = Math.ceil(selectedFiles.length / BATCH_SIZE);
+        const batches = [];
 
         for (let i = 0; i < selectedFiles.length; i += BATCH_SIZE) {
           const batch = selectedFiles.slice(i, i + BATCH_SIZE);
           const formData = new FormData();
-
-          batch.forEach((file) => {
-            formData.append("files", file); // key must match FastAPI parameter name
-          });
-
-          const { uploaded } = await uploadImages(formData);
-          console.log(`Batch uploaded (${uploaded.length} files)`);
-
-          setUploadProgress(Math.round(((i + BATCH_SIZE) / selectedFiles.length) * 100));
+          batch.forEach((file) => formData.append("files", file));
+          batches.push(() =>
+            uploadImages(formData).then((res) => {
+              const completed = Math.min(i + BATCH_SIZE, selectedFiles.length);
+              setUploadProgress(Math.round((completed / selectedFiles.length) * 100));
+              return res;
+            })
+          );
         }
+
+        await Promise.all(batches.map((fn) => limit(fn)));
 
         alert("All images uploaded successfully!");
         setSelectedFiles([]);
         if (isAdmin || isEditor) await fetchImages();
       } catch (err: any) {
         console.error(err);
-        alert(`Upload failed: ${err.message || err}`);
+        alert(`Upload failed: ${err.message}`);
       }
 
       setUploading(false);
       setUploadProgress(0);
     };
+
 
 
 
