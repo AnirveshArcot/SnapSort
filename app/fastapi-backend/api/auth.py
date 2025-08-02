@@ -100,6 +100,8 @@ async def register_user(user: RegisterUser):
         box = await asyncio.to_thread(localize_faces_func, img)
         if not box:
             raise ValueError("No face detected")
+        if len(box)>1:
+            raise ValueError("Too many faces detected")
 
         x, y, w, h = box[0]
         face_img = img[y:y + h, x:x + w]
