@@ -33,7 +33,6 @@ def extract_features_func(face_image):
     try:
         result = DeepFace.represent(
             face_image,
-            model=extract_features_func._model,
             model_name="SFace",
             enforce_detection=False,
             align=True,
