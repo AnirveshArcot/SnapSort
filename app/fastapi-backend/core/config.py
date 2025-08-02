@@ -6,7 +6,7 @@ import time
 from dotenv import load_dotenv
 from services.faiss_index import load_faiss_index, save_faiss_index
 from db.mongo import users_collection, feature_vector_collection, user_id_map, settings_coll
-
+from services.face_matching import load_models, unload_models
 load_dotenv()
 
 ADMIN_MAIL = os.getenv("ADMIN_EMAIL")
@@ -120,8 +120,9 @@ async def set_faiss_index(index):
     if current_event_id:
         save_faiss_index(index, current_event_id)
 
-
 async def lifespan(app):
+    # Load models at startup
+    load_models()
     print("Starting up application")
 
     current_event_id = await get_current_event_id()
@@ -138,5 +139,7 @@ async def lifespan(app):
 
     yield
 
+    # Cleanup on shutdown
     print("Cleaning up application")
     unmount_sshfs()
+    unload_models()

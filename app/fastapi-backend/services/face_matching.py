@@ -1,14 +1,14 @@
 # services/face_matching.py
 import gc
 import traceback
-from fastapi import HTTPException
-import psutil
-from services.image_processing import fetch_image_from_cdn
-from tqdm import tqdm
 import os
 import json
 import numpy as np
 import faiss
+from tqdm import tqdm
+from fastapi import HTTPException
+
+from services.image_processing import fetch_image_from_cdn
 from core.config import (
     settings_coll,
     feature_vector_collection,
@@ -19,25 +19,43 @@ from core.config import (
     get_current_event_id,
     get_faiss_index
 )
+
 from deepface import DeepFace
 from ultralytics import YOLO
 
+# Global models
+model = None
+arcface_model = None
 
+def load_models():
+    global model, arcface_model
+    if model is None:
+        model = YOLO("./yolov8n_face_trained.pt")
+    if arcface_model is None:
+        arcface_model = DeepFace.build_model("SFace")
 
+def unload_models():
+    global model, arcface_model
+    try:
+        import torch
+        if model is not None or arcface_model is not None:
+            torch.cuda.empty_cache()
+        model = None
+        arcface_model = None
+    except ImportError:
+        pass
 
 def extract_features_func(face_image):
-    arcface_model = DeepFace.build_model("SFace")
     result = DeepFace.represent(
         face_image,
         model_name="SFace",
         enforce_detection=False,
-        align=True
+        align=True,
+        model=arcface_model
     )
     return result[0]["embedding"]
 
-
 def localize_faces_func(image):
-    model = YOLO("./yolov8n_face_trained.pt")
     results = model.predict(source=image, conf=0.25, verbose=False)
     face_boxes = []
     for box in results[0].boxes.xyxy:
@@ -45,7 +63,7 @@ def localize_faces_func(image):
         face_boxes.append((x1, y1, x2, y2))
     return face_boxes
 
-def process_image(file, feature_records, int_id_map, faiss_index, similarity_threshold):
+def process_image(file, int_id_map, faiss_index, similarity_threshold):
     try:
         image = file["image"]
         file_key = file["file_key"]
@@ -55,17 +73,17 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
             return {}
 
         vecs = []
+        valid_boxes = []
 
         for (x1, y1, x2, y2) in bounding_boxes:
             face_img = image[y1:y2, x1:x2]
-
             try:
                 feat = extract_features_func(face_img)
-                if feat is None:
-                    continue
-                vecs.append(np.array(feat, dtype='float32'))
-            except Exception as fe:
-                continue  # skip this face if feature extraction fails
+                if feat is not None:
+                    vecs.append(np.array(feat, dtype='float32'))
+                    valid_boxes.append((x1, y1, x2, y2))
+            except Exception:
+                continue
 
         if not vecs:
             return {}
@@ -75,26 +93,19 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
         similarities, indices = faiss_index.search(batch, 1)
 
         matches = {}
-        for i, box in enumerate(bounding_boxes):
-            if i >= len(similarities):  # in case some faces were skipped
-                continue
-
+        for i, box in enumerate(valid_boxes):
             best_score = float(similarities[i, 0])
             best_int_id = int(indices[i, 0])
-
             if best_score >= similarity_threshold:
                 obj_id = int_id_map.get(best_int_id)
-                if obj_id is None:
-                    continue
+                if obj_id:
+                    pid = str(obj_id)
+                    matches.setdefault(pid, []).append({
+                        "file_key": file_key,
+                        "bounding_box": box,
+                        "similarity": best_score
+                    })
 
-                pid = str(obj_id)
-                matches.setdefault(pid, []).append({
-                    "file_key": file_key,
-                    "bounding_box": box,
-                    "similarity": best_score
-                })
-
-        # Explicit memory cleanup
         del image, file, vecs, batch, similarities, indices
         gc.collect()
 
@@ -105,17 +116,14 @@ def process_image(file, feature_records, int_id_map, faiss_index, similarity_thr
         gc.collect()
         return None
 
-
 def upload_to_cdn(file_name, json_data):
     file_path = os.path.join(IMAGE_STORAGE_PATH, file_name)
-
     try:
         with open(file_path, "w") as f:
             json.dump(json_data, f, indent=4)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to save JSON file: {str(e)}")
-
-    return {"url": f"local://{file_path}"}  # Simulated URL
+    return {"url": f"local://{file_path}"}
 
 def list_event_files(event_id: str):
     event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
@@ -166,36 +174,28 @@ async def run_face_matching():
             for record in id_map_list if "int_id" in record
         }
 
-
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
-            base, ext = os.path.splitext(file_name)
-            if not base.endswith("_compressed"):
-                continue
-
             try:
                 image_path = f"{current_event}/{file_name}"
                 image = fetch_image_from_cdn(image_path)
-
                 if image is None:
                     continue
 
                 file = {"image": image, "file_key": file_name}
-                result = process_image(file, all_records, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD)
+                result = process_image(file, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD)
 
                 if result:
                     for person_id, file_matches in result.items():
-                        if person_id not in matches:
-                            matches[person_id] = []
-
+                        matches.setdefault(person_id, [])
                         for match in file_matches:
-                            fk = match['file_key']
-                            if fk not in matches[person_id]:
-                                matches[person_id].append(fk)
+                            if match['file_key'] not in matches[person_id]:
+                                matches[person_id].append(match['file_key'])
 
                 del image, file, result
                 gc.collect()
 
             except Exception:
+                traceback.print_exc()
                 continue
 
         matches_json = {"matches": matches}
