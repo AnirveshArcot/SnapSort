@@ -47,6 +47,20 @@ export default function AdminPage() {
 
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const handleLoadMore = async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      await fetchImages();
+    } catch (error) {
+      console.error("Failed to load more images", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -379,8 +393,8 @@ export default function AdminPage() {
                       </div>
                       {hasMore && (
                         <div className="mt-4 text-center">
-                          <Button onClick={() => fetchImages()} disabled={uploading}>
-                            Load More
+                          <Button onClick={handleLoadMore} disabled={uploading || loadingMore}>
+                            {loadingMore ? "Loading..." : "Load More"}
                           </Button>
                         </div>
                       )}
