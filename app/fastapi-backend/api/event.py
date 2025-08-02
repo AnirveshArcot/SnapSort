@@ -146,7 +146,12 @@ async def download_image(
     raise HTTPException(status_code=404, detail="File not found")
 
 
-@router.get("/get-images", response_model=List[dict])
+from fastapi import APIRouter, HTTPException, Query, Depends
+from typing import List
+import os, json, base64, asyncio
+import aiofiles
+
+@router.get("/get-images")
 async def get_images(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, gt=0),
@@ -158,16 +163,13 @@ async def get_images(
 
     event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
     if not await asyncio.to_thread(os.path.exists, event_folder):
-        return []
+        return {"images": [], "total_count": 0}
 
     async def list_previews():
         return sorted([
             f for f in await asyncio.to_thread(os.listdir, event_folder)
             if f.lower().endswith("_preview.jpeg")
         ])
-
-    async def file_exists(path: str) -> bool:
-        return await asyncio.to_thread(os.path.exists, path)
 
     async def read_base64_image(file_path: str) -> str | None:
         try:
@@ -177,48 +179,56 @@ async def get_images(
         except Exception:
             return None
 
-    images = []
+    async def file_exists(path: str) -> bool:
+        return await asyncio.to_thread(os.path.exists, path)
 
+    images = []
+    total_count = 0
+
+    # Admin / Editor: show all previews
     if current_user.role in ["admin", "editor"]:
         all_previews = await list_previews()
+        total_count = len(all_previews)
         batch = all_previews[skip:skip + limit]
         for f in batch:
             img_path = os.path.join(event_folder, f)
             encoded = await read_base64_image(img_path)
             if encoded:
                 images.append({"name": f, "base64": encoded})
-        return images
+        return {"images": images, "total_count": total_count}
 
+    # Photographer: show only matched previews
     if current_user.role == "photographer":
-        return []
+        matches_path = os.path.join(event_folder, "matches.json")
+        if not await file_exists(matches_path):
+            return {"images": [], "total_count": 0}
 
-    matches_path = os.path.join(event_folder, "matches.json")
-    if not await file_exists(matches_path):
-        return []
+        try:
+            async with aiofiles.open(matches_path, "r") as f:
+                matches_data = json.loads(await f.read())
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="Invalid matches.json format")
 
-    try:
-        async with aiofiles.open(matches_path, "r") as f:
-            matches_data = json.loads(await f.read())
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Invalid matches.json format")
+        matched_files = matches_data.get("matches", {}).get(current_user.id, [])
+        matched_previews = []
+        for filename in matched_files:
+            base = os.path.splitext(filename.replace("_compressed", ""))[0]
+            preview_filename = f"{base}_preview.jpeg"
+            preview_path = os.path.join(event_folder, preview_filename)
+            if await file_exists(preview_path):
+                matched_previews.append(preview_filename)
 
-    matched_files = matches_data.get("matches", {}).get(current_user.id, [])
-    matched_previews = []
+        matched_previews = sorted(matched_previews)
+        total_count = len(matched_previews)
+        batch = matched_previews[skip:skip + limit]
 
-    for filename in matched_files:
-        base = os.path.splitext(filename.replace("_compressed", ""))[0]
-        preview_filename = f"{base}_preview.jpeg"
-        preview_path = os.path.join(event_folder, preview_filename)
-        if await file_exists(preview_path):
-            matched_previews.append(preview_filename)
+        for preview_filename in batch:
+            preview_path = os.path.join(event_folder, preview_filename)
+            encoded = await read_base64_image(preview_path)
+            if encoded:
+                images.append({"name": preview_filename, "base64": encoded})
 
-    matched_previews = sorted(matched_previews)
-    batch = matched_previews[skip:skip + limit]
+        return {"images": images, "total_count": total_count}
 
-    for preview_filename in batch:
-        preview_path = os.path.join(event_folder, preview_filename)
-        encoded = await read_base64_image(preview_path)
-        if encoded:
-            images.append({"name": preview_filename, "base64": encoded})
-
-    return images
+    # Unhandled role
+    return {"images": [], "total_count": 0}

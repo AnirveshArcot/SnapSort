@@ -73,9 +73,14 @@ export async function uploadImages(formData: FormData) {
 }
 
 
-export async function getImages(skip = 0, limit = 20) {
-  return await fetchAPI(`/event/get-images?skip=${skip}&limit=${limit}`);
+export async function getImages(skip = 0, limit = 20): Promise<{ images: { name: string; base64: string }[]; total_count: number }> {
+  const res = await fetchAPI(`/event/get-images?skip=${skip}&limit=${limit}`);
+  return {
+    images: res.images || [],
+    total_count: res.total_count || 0,
+  };
 }
+
 
 
 export async function downloadImageBlob(filename: string): Promise<Blob> {
