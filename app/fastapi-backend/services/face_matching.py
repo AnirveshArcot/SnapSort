@@ -213,3 +213,14 @@ async def run_face_matching():
             {"$set": {"status": "error", "error_detail": str(e)}},
             upsert=True
         )
+
+    finally:
+        if hasattr(get_yolo_model, "_model"):
+            del get_yolo_model._model
+        try:
+            from deepface import DeepFace
+            if "SFace" in DeepFace.models:
+                del DeepFace.models["SFace"]
+        except Exception:
+            pass
+        gc.collect()
