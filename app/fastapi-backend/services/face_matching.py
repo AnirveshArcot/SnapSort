@@ -30,9 +30,6 @@ def get_yolo_model():
 
 def extract_features_func(face_image):
     from deepface import DeepFace
-    if not hasattr(extract_features_func, "_model"):
-        extract_features_func._model = DeepFace.build_model("SFace")
-
     try:
         result = DeepFace.represent(
             face_image,
