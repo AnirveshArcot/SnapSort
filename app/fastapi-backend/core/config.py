@@ -6,7 +6,6 @@ import time
 from dotenv import load_dotenv
 from services.faiss_index import load_faiss_index, save_faiss_index
 from db.mongo import users_collection, feature_vector_collection, user_id_map, settings_coll
-from services.model_loader import load_models, unload_models
 load_dotenv()
 
 ADMIN_MAIL = os.getenv("ADMIN_EMAIL")
