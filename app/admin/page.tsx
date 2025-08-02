@@ -104,18 +104,13 @@ export default function AdminPage() {
 
         for (let i = 0; i < selectedFiles.length; i += BATCH_SIZE) {
           const batch = selectedFiles.slice(i, i + BATCH_SIZE);
+          const formData = new FormData();
 
-          const base64Payload = await Promise.all(
-            batch.map(async (file) => {
-              const base64 = await convertToBase64(file);
-              return {
-                filename: file.name,
-                base64,
-              };
-            })
-          );
+          batch.forEach((file) => {
+            formData.append("files", file); // key must match FastAPI parameter name
+          });
 
-          const { uploaded } = await uploadImages(base64Payload);
+          const { uploaded } = await uploadImages(formData);
           console.log(`Batch uploaded (${uploaded.length} files)`);
 
           setUploadProgress(Math.round(((i + BATCH_SIZE) / selectedFiles.length) * 100));
@@ -132,6 +127,7 @@ export default function AdminPage() {
       setUploading(false);
       setUploadProgress(0);
     };
+
 
 
   // Remove handleCreateEvent and handleMatchFaces functions

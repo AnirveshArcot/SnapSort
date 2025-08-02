@@ -65,13 +65,13 @@ export async function getSession() {
 }
 
 
-export async function uploadImages(images: { filename: string, base64: string }[]) {
+export async function uploadImages(formData: FormData) {
   return await fetchAPI("/event/upload-images", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ images }),
+    body: formData,
   });
 }
+
 
 export async function getImages() {
   return await fetchAPI("/event/get-images");

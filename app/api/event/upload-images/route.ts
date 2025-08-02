@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.BACKEND_URL;  // e.g. "http://localhost:8000"
+const BACKEND_URL = process.env.BACKEND_URL; 
 
 export async function POST(request: Request) {
   const cookie = request.headers.get("cookie") ?? "";
-  const body = await request.text();  // the JSON payload from the client
+  const formData = await request.formData();
 
   const res = await fetch(`${BACKEND_URL}/event/upload-images`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
       cookie,
+      
     },
-    body,
+    body: formData,
   });
 
   const payload = await res.json();
@@ -24,3 +24,4 @@ export async function POST(request: Request) {
   }
   return NextResponse.json(payload, { status: 201 });
 }
+

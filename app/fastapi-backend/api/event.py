@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from typing import List
 from grpc import Status
@@ -16,7 +16,10 @@ import numpy as np
 router = APIRouter()
 
 @router.post("/upload-images", response_model=UploadImagesResponse)
-async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depends(get_current_user)):
+async def upload_images(
+    files: List[UploadFile] = File(...),
+    current_user: UserOut = Depends(get_current_user),
+):
     if current_user.role not in ["photographer", "editor", "admin"]:
         raise HTTPException(status_code=403, detail="Not allowed to upload images")
 
@@ -28,31 +31,29 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
     os.makedirs(event_folder, exist_ok=True)
     uploaded = []
 
-    for img in req.images:
-        header, _, payload = img.base64.partition(",")
-        try:
-            image_data = base64.b64decode(payload or img.base64)
-        except Exception as e:
-            raise HTTPException(status_code=Status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid base64 image for file {img.filename}: {e}")
+    for file in files:
+        contents = await file.read()
+        filename = file.filename
+        base_name, ext = os.path.splitext(filename)
 
-        base_name, ext = os.path.splitext(img.filename)
-
+        # Editor gets a single edited version
         if current_user.role == "editor":
             filename = f"{base_name}_edited{ext}"
             file_path = os.path.join(event_folder, filename)
             async with aiofiles.open(file_path, "wb") as fout:
-                await fout.write(image_data)
+                await fout.write(contents)
             uploaded.append(filename)
             continue
 
+        # Photographer: Save original
         original_filename = f"{base_name}_original{ext}"
         original_path = os.path.join(event_folder, original_filename)
         async with aiofiles.open(original_path, "wb") as fout:
-            await fout.write(image_data)
+            await fout.write(contents)
         uploaded.append(original_filename)
 
         try:
-            nparr = np.frombuffer(image_data, np.uint8)
+            nparr = np.frombuffer(contents, np.uint8)
             img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             if img_np is None:
                 raise ValueError("Decoded image is None")
@@ -89,9 +90,10 @@ async def upload_images(req: UploadImagesRequest, current_user: UserOut = Depend
             uploaded.append(compressed_filename)
 
         except Exception as e:
-            raise HTTPException(status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process image {img.filename}: {e}")
+            raise HTTPException(status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process image {file.filename}: {e}")
 
     return UploadImagesResponse(uploaded=uploaded)
+
 
 
 @router.get("/download")
