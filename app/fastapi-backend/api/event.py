@@ -143,30 +143,42 @@ async def get_images(
     event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
     images = []
 
-    if not os.path.exists(event_folder):
+    if not await asyncio.to_thread(os.path.exists, event_folder):
         return images
 
-    def get_all_previews():
-        return sorted([f for f in os.listdir(event_folder) if f.lower().endswith("_preview.jpeg")])
+    async def get_all_previews():
+        return sorted([
+            f for f in await asyncio.to_thread(os.listdir, event_folder)
+            if f.lower().endswith("_preview.jpeg")
+        ])
+
+    async def file_exists(path: str) -> bool:
+        return await asyncio.to_thread(os.path.exists, path)
+
+    async def read_base64_image(file_path: str) -> str | None:
+        try:
+            async with aiofiles.open(file_path, "rb") as image_file:
+                content = await image_file.read()
+                return f"data:image/jpeg;base64,{base64.b64encode(content).decode('utf-8')}"
+        except Exception:
+            return None
 
     if current_user.role in ["admin", "editor"]:
-        all_previews = get_all_previews()
+        all_previews = await get_all_previews()
         batch = all_previews[skip:skip + limit]
+
         for f in batch:
             file_path = os.path.join(event_folder, f)
-            try:
-                async with aiofiles.open(file_path, "rb") as image_file:
-                    encoded_string = base64.b64encode(await image_file.read()).decode("utf-8")
-                    images.append({"name": f, "base64": f"data:image/jpeg;base64,{encoded_string}"})
-            except Exception:
-                continue
+            encoded_string = await read_base64_image(file_path)
+            if encoded_string:
+                images.append({"name": f, "base64": encoded_string})
         return images
 
     if current_user.role == "photographer":
         return []
 
     matches_path = os.path.join(event_folder, "matches.json")
-    if not os.path.exists(matches_path):
+    if not await file_exists(matches_path):
         return images
 
     try:
@@ -183,7 +195,7 @@ async def get_images(
         base = os.path.splitext(filename.replace("_compressed", ""))[0]
         preview_filename = f"{base}_preview.jpeg"
         preview_path = os.path.join(event_folder, preview_filename)
-        if os.path.exists(preview_path):
+        if await file_exists(preview_path):
             matched_previews.append(preview_filename)
 
     matched_previews = sorted(matched_previews)
@@ -191,11 +203,8 @@ async def get_images(
 
     for preview_filename in batch:
         preview_path = os.path.join(event_folder, preview_filename)
-        try:
-            async with aiofiles.open(preview_path, "rb") as image_file:
-                encoded_string = base64.b64encode(await image_file.read()).decode("utf-8")
-                images.append({"name": preview_filename, "base64": f"data:image/jpeg;base64,{encoded_string}"})
-        except Exception:
-            continue
+        encoded_string = await read_base64_image(preview_path)
+        if encoded_string:
+            images.append({"name": preview_filename, "base64": encoded_string})
 
     return images
