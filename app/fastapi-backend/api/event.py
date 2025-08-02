@@ -128,8 +128,14 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
     raise HTTPException(status_code=404, detail="File not found")
 
 
+from fastapi import Query
+
 @router.get("/get-images", response_model=List[dict])
-async def get_images(current_user: UserOut = Depends(get_current_user)):
+async def get_images(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, gt=0),
+    current_user: UserOut = Depends(get_current_user),
+):
     event_id = await get_current_event_id()
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
@@ -140,16 +146,20 @@ async def get_images(current_user: UserOut = Depends(get_current_user)):
     if not os.path.exists(event_folder):
         return images
 
+    def get_all_previews():
+        return sorted([f for f in os.listdir(event_folder) if f.lower().endswith("_preview.jpeg")])
+
     if current_user.role in ["admin", "editor"]:
-        for f in os.listdir(event_folder):
-            if f.lower().endswith("_preview.jpeg"):
-                file_path = os.path.join(event_folder, f)
-                try:
-                    async with aiofiles.open(file_path, "rb") as image_file:
-                        encoded_string = base64.b64encode(await image_file.read()).decode("utf-8")
-                        images.append({"name": f, "base64": f"data:image/jpeg;base64,{encoded_string}"})
-                except Exception:
-                    continue
+        all_previews = get_all_previews()
+        batch = all_previews[skip:skip + limit]
+        for f in batch:
+            file_path = os.path.join(event_folder, f)
+            try:
+                async with aiofiles.open(file_path, "rb") as image_file:
+                    encoded_string = base64.b64encode(await image_file.read()).decode("utf-8")
+                    images.append({"name": f, "base64": f"data:image/jpeg;base64,{encoded_string}"})
+            except Exception:
+                continue
         return images
 
     if current_user.role == "photographer":
@@ -167,15 +177,20 @@ async def get_images(current_user: UserOut = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Invalid matches.json format")
 
     matched_files = matches_data.get("matches", {}).get(current_user.id, [])
+    matched_previews = []
 
     for filename in matched_files:
         base = os.path.splitext(filename.replace("_compressed", ""))[0]
         preview_filename = f"{base}_preview.jpeg"
         preview_path = os.path.join(event_folder, preview_filename)
+        if os.path.exists(preview_path):
+            matched_previews.append(preview_filename)
 
-        if not os.path.exists(preview_path):
-            continue
+    matched_previews = sorted(matched_previews)
+    batch = matched_previews[skip:skip + limit]
 
+    for preview_filename in batch:
+        preview_path = os.path.join(event_folder, preview_filename)
         try:
             async with aiofiles.open(preview_path, "rb") as image_file:
                 encoded_string = base64.b64encode(await image_file.read()).decode("utf-8")

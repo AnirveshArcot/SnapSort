@@ -73,9 +73,10 @@ export async function uploadImages(formData: FormData) {
 }
 
 
-export async function getImages() {
-  return await fetchAPI("/event/get-images");
+export async function getImages(skip: number = 0, limit: number = 20) {
+  return await fetchAPI(`/event/get-images?skip=${skip}&limit=${limit}`);
 }
+
 
 export async function downloadImageBlob(filename: string): Promise<Blob> {
   const res = await fetchAPIMedia(`/event/download?filename=${encodeURIComponent(filename)}`);
