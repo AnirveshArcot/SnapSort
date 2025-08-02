@@ -28,7 +28,7 @@ export default function EventImagesPage() {
   const [user, setUser] = useState<User | null>(null);
   const [images, setImages] = useState<EventImage[]>([]);
   const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const [totalPages, setTotalPages] = useState(1);
   const [loadingImages, setLoadingImages] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -52,24 +52,19 @@ export default function EventImagesPage() {
     }
   };
 
-  const fetchImages = async (reset = false) => {
+  const fetchImages = async (targetPage: number = page) => {
     try {
-      const pageToFetch = reset ? 0 : page;
-      const res = await getImages(pageToFetch * IMAGES_PER_PAGE, IMAGES_PER_PAGE);
+      setLoadingImages(true);
+      const res = await getImages(targetPage * IMAGES_PER_PAGE, IMAGES_PER_PAGE);
       const newImages = Array.isArray(res) ? res : res.images || [];
+      const count = res.total_count || 0;
+      const calculatedPages = Math.max(1, Math.ceil(count / IMAGES_PER_PAGE));
 
-      if (reset) {
-        setImages(newImages);
-        setPage(1);
-      } else {
-        setImages((prev) => [...prev, ...newImages]);
-        setPage((prev) => prev + 1);
-      }
-
-      setHasMore(newImages.length === IMAGES_PER_PAGE);
+      setImages(newImages);
+      setPage(targetPage);
+      setTotalPages(calculatedPages);
     } catch (err) {
       console.error("Failed to fetch images:", err);
-      setHasMore(false);
     } finally {
       setLoadingImages(false);
       setLoadingMore(false);
@@ -89,7 +84,7 @@ export default function EventImagesPage() {
           return;
         }
         setUser(sessionUser);
-        await fetchImages(true);
+        await fetchImages(0);
         setChecking(false);
       } else {
         router.push("/login");
@@ -165,13 +160,46 @@ export default function EventImagesPage() {
             ))}
           </div>
 
-          {hasMore && (
-            <div className="text-center mt-4">
-              <Button onClick={() => { setLoadingMore(true); fetchImages(); }} disabled={loadingMore}>
-                {loadingMore ? "Loading..." : "Load More"}
+          {/* Pagination */}
+          <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:gap-4 items-center justify-between">
+            <div className="flex gap-2">
+              <Button
+                onClick={() => fetchImages(page - 1)}
+                disabled={page === 0}
+              >
+                Previous
+              </Button>
+              <Button
+                onClick={() => fetchImages(page + 1)}
+                disabled={page + 1 >= totalPages}
+              >
+                Next
               </Button>
             </div>
-          )}
+
+            <div className="flex items-center gap-2">
+              <span>
+                Page <strong>{page + 1}</strong> of <strong>{totalPages}</strong>
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={totalPages}
+                defaultValue={page + 1}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const target = e.target as HTMLInputElement;
+                    const pageNumber = parseInt(target.value);
+                    if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= totalPages) {
+                      fetchImages(pageNumber - 1);
+                    }
+                  }
+                }}
+                className="w-16 px-2 py-1 border rounded text-center"
+              />
+              <span className="text-sm text-muted-foreground">Press Enter to jump</span>
+            </div>
+          </div>
         </div>
       )}
     </div>
