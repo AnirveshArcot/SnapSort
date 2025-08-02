@@ -307,15 +307,40 @@ export default function AdminPage() {
                           </div>
                         ))}
                       </div>
-                      <div className="mt-4 flex justify-between items-center">
-                        <Button onClick={() => fetchImages(page - 1)} disabled={page === 0}>
-                          Previous
-                        </Button>
-                        <span>Page {page + 1} of {totalPages}</span>
-                        <Button onClick={() => fetchImages(page + 1)} disabled={page + 1 >= totalPages}>
-                          Next
-                        </Button>
+                      <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:gap-4 items-center justify-between">
+                        <div className="flex gap-2">
+                          <Button onClick={() => fetchImages(page - 1)} disabled={page === 0}>
+                            Previous
+                          </Button>
+                          <Button onClick={() => fetchImages(page + 1)} disabled={page + 1 >= totalPages}>
+                            Next
+                          </Button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span>
+                            Page <strong>{page + 1}</strong> of <strong>{totalPages}</strong>
+                          </span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={totalPages}
+                            defaultValue={page + 1}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const target = e.target as HTMLInputElement;
+                                const pageNumber = parseInt(target.value);
+                                if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= totalPages) {
+                                  fetchImages(pageNumber - 1);
+                                }
+                              }
+                            }}
+                            className="w-16 px-2 py-1 border rounded text-center"
+                          />
+                          <span className="text-sm text-muted-foreground">Press Enter to jump</span>
+                        </div>
                       </div>
+
                     </>
                   ) : (
                     <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
