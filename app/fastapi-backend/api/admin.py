@@ -32,26 +32,17 @@ async def get_current_admin(current_user: UserOut = Depends(get_current_user)):
 async def match_faces(admin_user: UserOut = Depends(get_current_admin)):
     current_settings = await config.settings_coll.find_one({"_id": "current_event"})
     current_status = current_settings.get("status") if current_settings else "free"
-
     if current_status == "processing":
         raise HTTPException(status_code=409, detail="Matching is already in progress.")
-    
+
     await config.settings_coll.update_one(
         {"_id": "current_event"},
         {"$set": {"status": "processing"}},
         upsert=True
     )
 
-    def run_face_matching_sync():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_face_matching())
-        loop.close()
-
-    asyncio.create_task(asyncio.to_thread(run_face_matching_sync))
-
+    asyncio.create_task(run_face_matching())
     return {"message": "Face matching has started in the background.", "status": "processing"}
-
 
 
 

@@ -1,4 +1,5 @@
 # services/face_matching.py
+import asyncio
 import gc
 import traceback
 import os
@@ -173,12 +174,15 @@ async def run_face_matching():
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             try:
                 image_path = f"{current_event}/{file_name}"
-                image = fetch_image_from_cdn(image_path)
+
+                image = await asyncio.to_thread(fetch_image_from_cdn, image_path)
                 if image is None:
                     continue
 
                 file = {"image": image, "file_key": file_name}
-                result = process_image(file, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD)
+                result = await asyncio.to_thread(
+                    process_image, file, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD
+                )
 
                 if result:
                     for person_id, file_matches in result.items():
@@ -195,7 +199,8 @@ async def run_face_matching():
                 continue
 
         matches_json = {"matches": matches}
-        upload_to_cdn(f"{current_event}/matches.json", matches_json)
+        await asyncio.to_thread(upload_to_cdn, f"{current_event}/matches.json", matches_json)
+
         await settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "free"}},
