@@ -9,7 +9,7 @@ from tqdm import tqdm
 from fastapi import HTTPException
 
 from services.image_processing import fetch_image_from_cdn
-from services.model_loader import get_yolo_model, get_arcface_model
+from services.model_loader import get_yolo_model, get_model_status
 
 from core.config import (
     settings_coll,
@@ -25,23 +25,30 @@ from core.config import (
 
 def extract_features_func(face_image):
     from deepface import DeepFace
-    result = DeepFace.represent(
-        face_image,
-        model_name="SFace",
-        enforce_detection=False,
-        align=True,
-        model=get_arcface_model()
-    )
-    return result[0]["embedding"]
+    try:
+        result = DeepFace.represent(
+            face_image,
+            model_name="SFace",
+            enforce_detection=False,
+            align=True,
+        )
+        return result[0]["embedding"]
+    except Exception as e:
+        print(f"Error extracting features: {e}")
+        return None
 
 def localize_faces_func(image):
-    model = get_yolo_model()
-    results = model.predict(source=image, conf=0.25, verbose=False)
-    face_boxes = []
-    for box in results[0].boxes.xyxy:
-        x1, y1, x2, y2 = map(int, box)
-        face_boxes.append((x1, y1, x2, y2))
-    return face_boxes
+    try:
+        model = get_yolo_model()
+        results = model.predict(source=image, conf=0.25, verbose=False)
+        face_boxes = []
+        for box in results[0].boxes.xyxy:
+            x1, y1, x2, y2 = map(int, box)
+            face_boxes.append((x1, y1, x2, y2))
+        return face_boxes
+    except Exception as e:
+        print(f"Error localizing faces: {e}")
+        return []
 
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
     try:
@@ -86,6 +93,7 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
                         "similarity": best_score
                     })
 
+        # Explicitly delete large objects to free memory
         del image, file, vecs, batch, similarities, indices
         gc.collect()
         return matches
@@ -153,6 +161,9 @@ async def run_face_matching():
             for record in id_map_list if "int_id" in record
         }
 
+        model_status = get_model_status()
+        print(f"Model status before processing: {model_status}")
+
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             try:
                 image_path = f"{current_event}/{file_name}"
@@ -179,7 +190,8 @@ async def run_face_matching():
 
         matches_json = {"matches": matches}
         upload_to_cdn(f"{current_event}/matches.json", matches_json)
-
+        model_status_after = get_model_status()
+        print(f"Model status after processing: {model_status_after}")
         await settings_coll.update_one(
             {"_id": "current_event"},
             {"$set": {"status": "free"}},
