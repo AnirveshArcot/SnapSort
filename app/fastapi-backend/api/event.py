@@ -1,20 +1,31 @@
 import asyncio
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
-from typing import List
-from grpc import Status
-from db.models import UploadImagesRequest, UploadImagesResponse, Base64Image, UserOut
-from core.config import ALLOWED_EXTENSIONS, IMAGE_STORAGE_PATH, CACHE_DIR, get_current_event_id
-from services.image_processing import decode_base64_image, get_cached_compressed_image, cache_compressed_image
-from api.auth import get_me as get_current_user
-import os
 import base64
 import json
+import os
+from typing import List
 import aiofiles
 import cv2
 import numpy as np
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from grpc import Status
+
+from api.auth import get_me as get_current_user
+from core.config import (
+    ALLOWED_EXTENSIONS,
+    CACHE_DIR,
+    IMAGE_STORAGE_PATH,
+    get_current_event_id,
+)
+from db.models import Base64Image, UploadImagesRequest, UploadImagesResponse, UserOut
+from services.image_processing import (
+    cache_compressed_image,
+    decode_base64_image,
+    get_cached_compressed_image,
+)
 
 router = APIRouter()
+
 
 @router.post("/upload-images", response_model=UploadImagesResponse)
 async def upload_images(
@@ -28,8 +39,10 @@ async def upload_images(
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
 
-    event_folder = os.path.join(IMAGE_STORAGE_PATH, f"{event_id}_edited" if current_user.role == "editor" else event_id)
-    os.makedirs(event_folder, exist_ok=True)
+    folder_name = f"{event_id}_edited" if current_user.role == "editor" else event_id
+    event_folder = os.path.join(IMAGE_STORAGE_PATH, folder_name)
+    await asyncio.to_thread(os.makedirs, event_folder, exist_ok=True)
+
     uploaded = []
 
     for file in files:
@@ -37,7 +50,6 @@ async def upload_images(
         filename = file.filename
         base_name, ext = os.path.splitext(filename)
 
-        # Editor gets a single edited version
         if current_user.role == "editor":
             filename = f"{base_name}_edited{ext}"
             file_path = os.path.join(event_folder, filename)
@@ -46,7 +58,7 @@ async def upload_images(
             uploaded.append(filename)
             continue
 
-        # Photographer: Save original
+        # Photographer
         original_filename = f"{base_name}_original{ext}"
         original_path = os.path.join(event_folder, original_filename)
         async with aiofiles.open(original_path, "wb") as fout:
@@ -91,14 +103,19 @@ async def upload_images(
             uploaded.append(compressed_filename)
 
         except Exception as e:
-            raise HTTPException(status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process image {file.filename}: {e}")
+            raise HTTPException(
+                status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process image {file.filename}: {e}",
+            )
 
     return UploadImagesResponse(uploaded=uploaded)
 
 
-
 @router.get("/download")
-async def download_image(filename: str = Query(...), current_user: UserOut = Depends(get_current_user)):
+async def download_image(
+    filename: str = Query(...),
+    current_user: UserOut = Depends(get_current_user),
+):
     event_id = await get_current_event_id()
     if not event_id:
         raise HTTPException(status_code=500, detail="Current event not set")
@@ -109,7 +126,7 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
     if current_user.role == "editor":
         for ext in ALLOWED_EXTENSIONS:
             file_path = os.path.join(folder, f"{base_name}_original{ext}")
-            if os.path.exists(file_path):
+            if await asyncio.to_thread(os.path.exists, file_path):
                 return FileResponse(path=file_path, filename=os.path.basename(file_path), media_type="application/octet-stream")
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -117,19 +134,17 @@ async def download_image(filename: str = Query(...), current_user: UserOut = Dep
     cache_path = os.path.join(CACHE_DIR, compressed_filename)
 
     cached_img = get_cached_compressed_image(compressed_filename)
-    if cached_img is not None and os.path.exists(cache_path):
+    if cached_img is not None and await asyncio.to_thread(os.path.exists, cache_path):
         return FileResponse(path=cache_path, filename=compressed_filename, media_type="application/octet-stream")
 
     file_path = os.path.join(folder, compressed_filename)
-    if os.path.exists(file_path):
+    if await asyncio.to_thread(os.path.exists, file_path):
         img = cv2.imread(file_path)
         cache_compressed_image(compressed_filename, img)
         return FileResponse(path=file_path, filename=compressed_filename, media_type="application/octet-stream")
 
     raise HTTPException(status_code=404, detail="File not found")
 
-
-from fastapi import Query
 
 @router.get("/get-images", response_model=List[dict])
 async def get_images(
@@ -142,12 +157,10 @@ async def get_images(
         raise HTTPException(status_code=500, detail="Current event not set")
 
     event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
-    images = []
-
     if not await asyncio.to_thread(os.path.exists, event_folder):
-        return images
+        return []
 
-    async def get_all_previews():
+    async def list_previews():
         return sorted([
             f for f in await asyncio.to_thread(os.listdir, event_folder)
             if f.lower().endswith("_preview.jpeg")
@@ -164,15 +177,16 @@ async def get_images(
         except Exception:
             return None
 
-    if current_user.role in ["admin", "editor"]:
-        all_previews = await get_all_previews()
-        batch = all_previews[skip:skip + limit]
+    images = []
 
+    if current_user.role in ["admin", "editor"]:
+        all_previews = await list_previews()
+        batch = all_previews[skip:skip + limit]
         for f in batch:
-            file_path = os.path.join(event_folder, f)
-            encoded_string = await read_base64_image(file_path)
-            if encoded_string:
-                images.append({"name": f, "base64": encoded_string})
+            img_path = os.path.join(event_folder, f)
+            encoded = await read_base64_image(img_path)
+            if encoded:
+                images.append({"name": f, "base64": encoded})
         return images
 
     if current_user.role == "photographer":
@@ -180,12 +194,11 @@ async def get_images(
 
     matches_path = os.path.join(event_folder, "matches.json")
     if not await file_exists(matches_path):
-        return images
+        return []
 
     try:
         async with aiofiles.open(matches_path, "r") as f:
-            content = await f.read()
-            matches_data = json.loads(content)
+            matches_data = json.loads(await f.read())
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="Invalid matches.json format")
 
@@ -204,8 +217,8 @@ async def get_images(
 
     for preview_filename in batch:
         preview_path = os.path.join(event_folder, preview_filename)
-        encoded_string = await read_base64_image(preview_path)
-        if encoded_string:
-            images.append({"name": preview_filename, "base64": encoded_string})
+        encoded = await read_base64_image(preview_path)
+        if encoded:
+            images.append({"name": preview_filename, "base64": encoded})
 
     return images
