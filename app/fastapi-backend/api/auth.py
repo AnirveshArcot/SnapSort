@@ -79,24 +79,20 @@ async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
 
 @router.post("/register", response_model=UserOut)
 async def register_user(user: RegisterUser):
-    print("[1] Start registration process")
     existing_user = await users_collection.find_one({"email": user.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered.")
 
-    print("[2] Decoding image")
     img = decode_base64_image(user.image)
     if img is None:
         raise HTTPException(status_code=400, detail="Invalid image data")
 
-    print("[3] Localizing face(s)")
     box = await asyncio.to_thread(localize_faces_func, img)
     if not box:
         raise HTTPException(status_code=400, detail="No face detected in image.")
     if len(box) > 1:
         raise HTTPException(status_code=400, detail="Multiple faces detected. Upload an image with only one face.")
 
-    print("[4] Compressing image")
     import cv2, base64
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]
     success, encoded_img = cv2.imencode('.jpg', img, encode_param)
@@ -104,12 +100,10 @@ async def register_user(user: RegisterUser):
         raise HTTPException(status_code=500, detail="Image compression failed")
     compressed_base64 = base64.b64encode(encoded_img).decode()
 
-    print("[5] Hashing password")
     hashed_password = await asyncio.to_thread(
         lambda: bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
     )
 
-    print("[6] Fetching current event ID")
     current_event = await get_current_event_id()
 
     user_data = {
@@ -120,11 +114,8 @@ async def register_user(user: RegisterUser):
         "role": "user"
     }
 
-    print("[7] Inserting user into database")
     result = await users_collection.insert_one(user_data)
     mongo_id = result.inserted_id
-
-    print("[8] Scheduling background task for face vector processing")
     async def process_vector():
         try:
             # Re-decode original image to extract vector (higher quality)
@@ -146,20 +137,16 @@ async def register_user(user: RegisterUser):
 
             faiss_index = await get_faiss_index()
             if faiss_index is None:
-                print("[WARN] FAISS index not found in memory")
                 return
             normed = normalize_vectors(np.array([vec]).astype("float32"))
             await asyncio.to_thread(
                 lambda: faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
             )
             await asyncio.to_thread(save_faiss_index, faiss_index, current_event)
-            print("[9] Vector added to FAISS")
         except Exception as e:
             print(f"[ERROR] Background feature extraction failed: {e}")
 
     asyncio.create_task(process_vector())
-
-    print("[10] Registration complete")
     return UserOut(id=str(mongo_id), **user_data)
 
 @router.post("/login")
