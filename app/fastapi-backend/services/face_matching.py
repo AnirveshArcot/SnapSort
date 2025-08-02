@@ -23,12 +23,12 @@ from deepface import DeepFace
 from ultralytics import YOLO
 
 model = YOLO("./model.pt")
-arcface_model = DeepFace.build_model("ArcFace")
+arcface_model = DeepFace.build_model("SFace")
 
 def extract_features_func(face_image):
     result = DeepFace.represent(
         face_image,
-        model_name="ArcFace",
+        model_name="SFace",
         enforce_detection=False,
         align=True
     )
