@@ -22,7 +22,7 @@ from core.config import (
 from deepface import DeepFace
 from ultralytics import YOLO
 
-model = YOLO("./model.pt")
+
 arcface_model = DeepFace.build_model("SFace")
 
 def extract_features_func(face_image):
@@ -36,6 +36,7 @@ def extract_features_func(face_image):
 
 
 def localize_faces_func(image):
+    model = YOLO("./model.pt")
     results = model.predict(source=image, conf=0.25, verbose=False)
     face_boxes = []
     for box in results[0].boxes.xyxy:
