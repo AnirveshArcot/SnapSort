@@ -1,15 +1,14 @@
+from services.model_loader import load_models, get_yolo_model, get_arcface_model
+from deepface import DeepFace
 import os
 import psutil
 import gc
 import numpy as np
 import cv2
 
-from deepface import DeepFace
-from services.model_loader import get_yolo_model, get_arcface_model
-
 def print_ram(note=""):
     process = psutil.Process(os.getpid())
-    rss = process.memory_info().rss / (1024 ** 2)  # in MB
+    rss = process.memory_info().rss / (1024 ** 2)
     print(f"[{note}] RAM Usage: {rss:.2f} MB")
 
 def create_dummy_image():
@@ -23,18 +22,17 @@ def create_dummy_image():
 def main():
     print_ram("Start")
 
-    # Load YOLO model
-    yolo = get_yolo_model()
-    print_ram("After YOLO loaded")
+    # ⬅️ IMPORTANT: Load models
+    load_models()
 
-    # Load ArcFace model
+    yolo = get_yolo_model()
     arcface = get_arcface_model()
+
+    print_ram("After YOLO loaded")
     print_ram("After ArcFace loaded")
 
-    # Dummy image
     img = create_dummy_image()
 
-    # YOLO inference
     results = yolo.predict(source=img, conf=0.25, verbose=False)
     boxes = results[0].boxes.xyxy
     print(f"YOLO detected {len(boxes)} faces")
@@ -44,7 +42,6 @@ def main():
         x1, y1, x2, y2 = map(int, boxes[0])
         face_crop = img[y1:y2, x1:x2]
 
-        # ArcFace inference via DeepFace
         embedding = DeepFace.represent(
             face_crop,
             model_name="SFace",
@@ -55,7 +52,6 @@ def main():
         print(f"ArcFace embedding length: {len(embedding[0]['embedding'])}")
         print_ram("After ArcFace inference")
 
-    # Cleanup
     del yolo, arcface, img, boxes, results
     gc.collect()
     print_ram("After cleanup")
