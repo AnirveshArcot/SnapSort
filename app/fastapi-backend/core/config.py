@@ -134,9 +134,6 @@ async def lifespan(app):
         upsert=True
     )
     start_mount_thread()
-
     yield
-
-    # Cleanup on shutdown
     print("Cleaning up application")
     unmount_sshfs()
