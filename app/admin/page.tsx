@@ -221,56 +221,28 @@ export default function AdminPage() {
 
 
   useEffect(() => {
-    let allowScrollListener = false;
-
-    const handleScroll = () => {
-      if (
-        window.innerHeight + document.documentElement.scrollTop >=
-          document.documentElement.offsetHeight - 300 &&
-        hasMore &&
-        !uploading &&
-        (user?.role === "admin" || user?.role === "editor")
-      ) {
-        fetchImages();
-      }
-    };
-
     (async () => {
       const sessionUser = await getSession();
       if (sessionUser) {
-        if (
-          sessionUser.role !== "admin" &&
-          sessionUser.role !== "photographer" &&
-          sessionUser.role !== "editor"
-        ) {
+        if (sessionUser.role !== "admin" && sessionUser.role !== "photographer" && sessionUser.role !== "editor") {
           router.push("/");
           return;
         }
-
         setUser(sessionUser);
         setChecking(false);
-
+        // Only fetch user list if admin
         if (sessionUser.role === "admin") {
           await fetchUserList();
         }
-
+        // Only fetch images if admin or editor (for download section)
         if (sessionUser.role === "admin" || sessionUser.role === "editor") {
           await fetchImages();
-          allowScrollListener = true;
-          window.addEventListener("scroll", handleScroll);
         }
       } else {
         router.push("/login");
       }
     })();
-
-    return () => {
-      if (allowScrollListener) {
-        window.removeEventListener("scroll", handleScroll);
-      }
-    };
-  }, [router, hasMore, uploading, page]);
-
+  }, [router]);
 
   // Remove useEffect that fetches user list on user change (handled above)
 
@@ -384,29 +356,39 @@ export default function AdminPage() {
                 <div className="space-y-2">
                   <h3 className="text-lg font-semibold">Uploaded Images</h3>
                   {imageList.length ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                      {imageList.map((img) => (
-                        <div
-                          key={img.name}
-                          className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
-                        >
-                          <img
-                            src={img.base64}
-                            alt={img.name}
-                            className="w-full h-48 object-cover"
-                          />
-                          <div className="p-2 flex justify-between items-center text-sm">
-                            <span className="truncate" title={img.name}>{img.name}</span>
-                            <Button onClick={() => handleDownload(img.name)}>
-                              Download
-                            </Button>
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                        {imageList.map((img) => (
+                          <div
+                            key={img.name}
+                            className="border rounded-lg overflow-hidden shadow hover:shadow-md transition"
+                          >
+                            <img
+                              src={img.base64}
+                              alt={img.name}
+                              className="w-full h-48 object-cover"
+                            />
+                            <div className="p-2 flex justify-between items-center text-sm">
+                              <span className="truncate" title={img.name}>{img.name}</span>
+                              <Button onClick={() => handleDownload(img.name)}>
+                                Download
+                              </Button>
+                            </div>
                           </div>
+                        ))}
+                      </div>
+                      {hasMore && (
+                        <div className="mt-4 text-center">
+                          <Button onClick={() => fetchImages()} disabled={uploading}>
+                            Load More
+                          </Button>
                         </div>
-                      ))}
-                    </div>
+                      )}
+                    </>
                   ) : (
                     <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
                   )}
+
                 </div>
               )}
             </TabsContent>
