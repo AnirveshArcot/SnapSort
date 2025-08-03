@@ -9,8 +9,9 @@ import numpy as np
 import faiss
 from tqdm import tqdm
 from fastapi import HTTPException
-import insightface
-from insightface.model_zoo import get_model
+import urllib
+import onnxruntime
+
 
 from services.image_processing import fetch_image_from_cdn
 from core.config import (
@@ -35,11 +36,27 @@ def get_yolo_model():
 
 
 def get_feature_extractor():
-    if not hasattr(get_feature_extractor, "_model"):
-        model = get_model('buffalo_l/feature_extractor', download=True)
-        model.prepare(ctx_id=-1)
-        get_feature_extractor._model = model
-    return get_feature_extractor._model
+    if not hasattr(get_feature_extractor, "_session"):
+        model_dir = "./models"
+        model_path = os.path.join(model_dir, "mobilefacenet.onnx")
+        model_url = "https://github.com/onnx/models/raw/main/vision/body_analysis/arcface/model/arcface_resnet100.onnx"
+
+        os.makedirs(model_dir, exist_ok=True)
+
+        if not os.path.exists(model_path):
+            print("[Model] Downloading MobileFaceNet ONNX model...")
+            try:
+                urllib.request.urlretrieve(model_url, model_path)
+                print("[Model] Download complete.")
+            except Exception as e:
+                raise RuntimeError(f"Failed to download model: {e}")
+
+        get_feature_extractor._session = onnxruntime.InferenceSession(
+            model_path, providers=["CPUExecutionProvider"]
+        )
+
+    return get_feature_extractor._session
+
 
 
 # ---------- Core Logic ----------
@@ -47,8 +64,15 @@ def get_feature_extractor():
 def extract_features_func(face_image: np.ndarray):
     try:
         model = get_feature_extractor()
-        face_resized = cv2.resize(face_image, (112, 112))
-        embedding = model.get(face_resized)
+        if face_image.shape[:2] != (112, 112):
+            face_image = cv2.resize(face_image, (112, 112))
+        face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
+        face_rgb = face_rgb.astype(np.float32)
+        face_rgb = (face_rgb - 127.5) / 128.0  # normalize to [-1, 1]
+        face_rgb = np.transpose(face_rgb, (2, 0, 1))[np.newaxis, ...]
+
+        embedding = model.run(None, {"data": face_rgb})[0][0]
+        embedding = embedding / np.linalg.norm(embedding)
         return embedding.tolist()
     except Exception as e:
         print(f"[extract_features_func] Error extracting features: {e}")
