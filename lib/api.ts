@@ -21,27 +21,17 @@ async function fetchAPIMedia(endpoint: string, options: RequestInit = {}) {
   return res
 }
 
-export async function registerUser(userData: Record<string, any>) {
-  const formData = new FormData()
-  for (const key in userData) {
-    formData.append(key, userData[key])
-  }
-  return fetchAPI('/auth/register', {
-    method: 'POST',
+export async function registerUser(formData: FormData) {
+  return await fetchAPI("/auth/register", {
+    method: "POST",
     body: formData,
-  })
+  });
 }
-
-
 
 
 export async function logoutUser() {
   return fetchAPI('/auth/logout', { method: 'POST' })
 }
-
-
-
-
 
 export async function loginUser(email: string, password: string) {
   const formData = new URLSearchParams();

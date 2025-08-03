@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { registerUser } from "@/lib/api";
+import { uploadImages } from "@/lib/api";
 
 interface CameraCaptureProps {
   onCapture: (file: File) => void;
@@ -70,7 +70,13 @@ function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
         {error ? (
           <p className="max-w-xs text-center text-sm text-destructive">{error}</p>
         ) : (
-          <video ref={videoRef} playsInline autoPlay muted className="h-auto max-w-full rounded-lg transform -scale-x-100" />
+          <video
+            ref={videoRef}
+            playsInline
+            autoPlay
+            muted
+            className="h-auto max-w-full rounded-lg transform -scale-x-100"
+          />
         )}
         <div className="mt-2 flex gap-4">
           <Button onClick={takePhoto} disabled={!!error}>Take photo</Button>
@@ -92,11 +98,7 @@ export function RegisterForm() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setImageFile(file);
-    if (file) {
-      setImagePreview(URL.createObjectURL(file));
-    } else {
-      setImagePreview(null);
-    }
+    setImagePreview(file ? URL.createObjectURL(file) : null);
   };
 
   const handleCapture = (file: File) => {
@@ -109,20 +111,22 @@ export function RegisterForm() {
     setIsLoading(true);
     setError("");
 
-    const fd = new FormData(e.currentTarget);
+    const formData = new FormData(e.currentTarget);
     if (imageFile) {
-      fd.set("image", imageFile);
+      formData.set("image", imageFile); // Ensure this matches FastAPI parameter
     }
 
     try {
-      const res = await registerUser(fd);
-      if (res?.error) {
-        setError(res.error);
+      const res = await uploadImages(formData);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.detail || "Registration failed. Please try again.");
       } else {
         router.push("/login");
       }
-    } catch (err) {
-      setError("Registration failed. Please try again.");
+    } catch {
+      setError("Network error. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -168,7 +172,10 @@ export function RegisterForm() {
         <div className="flex items-start gap-2">
           <input id="terms" name="terms" type="checkbox" required className="mt-1 h-4 w-4" />
           <Label htmlFor="terms" className="text-sm">
-            I agree to the <a href="/terms-indian-penal-code" className="underline" target="_blank" rel="noopener noreferrer">Terms &amp; Conditions</a>
+            I agree to the{" "}
+            <a href="/terms-indian-penal-code" className="underline" target="_blank" rel="noopener noreferrer">
+              Terms & Conditions
+            </a>
           </Label>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
