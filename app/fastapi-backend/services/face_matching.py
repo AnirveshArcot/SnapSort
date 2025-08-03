@@ -8,6 +8,9 @@ import numpy as np
 import faiss
 from tqdm import tqdm
 from fastapi import HTTPException
+from insightface.app import FaceAnalysis
+import cv2
+
 
 from services.image_processing import fetch_image_from_cdn
 from core.config import (
@@ -29,17 +32,18 @@ def get_yolo_model():
     return get_yolo_model._model
 
 
-def extract_features_func(face_image):
-    from deepface import DeepFace
+face_app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+face_app.prepare(ctx_id=0)
+
+
+def extract_features_func(face_image: np.ndarray):
     try:
-        result = DeepFace.represent(
-            img_path=face_image,
-            model_name="Facenet",
-            enforce_detection=False,
-            detector_backend="opencv",
-            align=True
-        )
-        return result[0]["embedding"]
+        faces = face_app.get(face_image)
+        if not faces:
+            print("No face detected.")
+            return None
+        
+        return faces[0].embedding.tolist()
     except Exception as e:
         print(f"Error extracting features: {e}")
         return None
@@ -76,13 +80,10 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
 
         for (x1, y1, x2, y2) in bounding_boxes:
             face_img = image[y1:y2, x1:x2]
-            try:
-                feat = extract_features_func(face_img)
-                if feat is not None:
-                    vecs.append(np.array(feat, dtype='float32'))
-                    valid_boxes.append((x1, y1, x2, y2))
-            except Exception:
-                continue
+            feat = extract_features_func(face_img)  
+            if feat is not None:
+                vecs.append(np.array(feat, dtype='float32'))
+                valid_boxes.append((x1, y1, x2, y2))
 
         if not vecs:
             return {}
