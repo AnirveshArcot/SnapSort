@@ -82,12 +82,12 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
             return {}
 
         valid_boxes = []
-        for x1, y1, x2, y2 in bounding_boxes:
-            face_img = image[y1:y2, x1:x2]
+        for x, y, w, h in bounding_boxes:
+            face_img = image[y:y+h, x:x+w]
             feat = extract_features_func(face_img)
             if feat is not None:
                 vecs.append(np.array(feat, dtype='float32'))
-                valid_boxes.append((x1, y1, x2, y2))
+                valid_boxes.append((y,y+h, x,x+h))
 
         if not vecs:
             return {}
