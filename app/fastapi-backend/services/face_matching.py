@@ -5,6 +5,7 @@ import traceback
 import os
 import json
 import cv2
+import deepface
 import numpy as np
 import faiss
 from tqdm import tqdm
@@ -35,19 +36,18 @@ def get_yolo_model():
 
 # ---------- Feature Extractor ----------
 
-def extract_features_func(face_image: np.ndarray):
-    from deepface import DeepFace
+def extract_features_vgg(face_image: np.ndarray, model_name="VGG-Face"):
     try:
-        result = DeepFace.represent(
+        result = deepface.represent(
             img_path=face_image,
-            model_name="ArcFace",
+            model_name=model_name,
             enforce_detection=False,
-            detector_backend="skip",  # Assumes image is already cropped or aligned
+            detector_backend="skip",  # Assumes face is already cropped
             align=True
         )
         return result[0]["embedding"]
     except Exception as e:
-        print(f"[extract_features_func] Error: {e}")
+        print(f"[extract_features_vgg] Error: {e}")
         return None
 
 
