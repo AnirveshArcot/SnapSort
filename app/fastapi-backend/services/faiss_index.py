@@ -1,8 +1,12 @@
 import os
 import faiss
 
+import os
+import faiss
+
 def load_faiss_index(event_id: str, dimension: int):
     from core.config import FAISS_INDEX_DIR
+
     if event_id is None:
         raise ValueError("`event_id` must be provided")
 
@@ -10,23 +14,30 @@ def load_faiss_index(event_id: str, dimension: int):
     index_path = os.path.join(FAISS_INDEX_DIR, f"{event_id}.faiss")
     print("Index path:", index_path)
     print("Exists:", os.path.exists(index_path))
+
     if os.path.exists(index_path):
         faiss_index = faiss.read_index(index_path)
-        # Get number of vectors and dimension
-        num_vectors = faiss_index.ntotal
-        dimension = faiss_index.d
-
-        # Print all vectors
-        for i in range(num_vectors):
-            vector = faiss_index.reconstruct(i)
-            print(f"Vector {i}: {vector}")
         print(f"Loaded FAISS index for event {event_id}")
+        print(f"Index type: {type(faiss_index)}")
+
+        num_vectors = faiss_index.ntotal
+        print(f"Total vectors: {num_vectors}")
+
+        # Attempt to print vectors if reconstruct() is supported
+        try:
+            for i in range(num_vectors):
+                vector = faiss_index.reconstruct(i)
+                print(f"Vector {i}: {vector}")
+        except Exception as e:
+            print(f"Could not reconstruct vectors: {e}")
+
     else:
         base = faiss.IndexFlatIP(dimension)
         faiss_index = faiss.IndexIDMap(base)
         print(f"Created new FAISS index for event {event_id}")
-    
+
     return faiss_index
+
 
 
 def save_faiss_index(faiss_index: faiss.Index, event_id: str):
