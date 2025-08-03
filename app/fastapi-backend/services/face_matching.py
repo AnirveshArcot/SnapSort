@@ -39,7 +39,7 @@ def get_feature_extractor():
     if not hasattr(get_feature_extractor, "_session"):
         model_dir = "./models"
         model_path = os.path.join(model_dir, "mobilefacenet.onnx")
-        model_url = "https://github.com/onnx/models/raw/main/vision/body_analysis/arcface/model/arcface_resnet100.onnx"
+        model_url = "https://huggingface.co/CuriousAI/mobilefacenet/resolve/main/mobilefacenet.onnx"
 
         os.makedirs(model_dir, exist_ok=True)
 
