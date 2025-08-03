@@ -171,9 +171,6 @@ async def run_face_matching():
         }
 
         matches = {}
-        print(" ")
-        print(compressed_files)
-        print(" ")
 
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             try:
@@ -186,9 +183,6 @@ async def run_face_matching():
                 result = await asyncio.to_thread(
                     process_image, file, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD
                 )
-                print(" ")
-                print(result)
-                print(" ")
                 if result:
                     for person_id, file_matches in result.items():
                         matches.setdefault(person_id, [])
