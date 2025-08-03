@@ -151,7 +151,7 @@ async def register_user(
             face_box = face_boxes[0]
             x, y, x2, y2 = face_box
             face_img = img[y:y2, x:x2]
-
+            print(face_img)
             vec = await asyncio.to_thread(extract_features_func, face_img)
             int_id = await allocate_int_id_for(str(mongo_id))
 

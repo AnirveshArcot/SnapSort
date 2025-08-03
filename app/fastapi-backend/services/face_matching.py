@@ -89,6 +89,7 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         for idx, (x1, y1, x2, y2) in enumerate(bounding_boxes):
             face_img = image[y1:y2, x1:x2]
             print(f"[process_image] Extracting features from face {idx+1} at box ({x1}, {y1}, {x2}, {y2})")
+            print(face_img)
             feat = extract_features_func(face_img)
             if feat is not None:
                 vec = np.array(feat, dtype='float32')
