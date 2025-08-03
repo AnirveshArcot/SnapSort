@@ -189,6 +189,7 @@ async def run_face_matching():
                 result = await asyncio.to_thread(
                     process_image, file, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD
                 )
+                print(result)
 
                 if result:
                     for person_id, file_matches in result.items():
