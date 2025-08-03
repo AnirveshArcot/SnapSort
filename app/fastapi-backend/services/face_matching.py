@@ -49,14 +49,12 @@ def extract_features_func(face_image: np.ndarray):
         face_app = get_face_app()
         print("[extract_features_func] Retrieved face_app instance.")
 
-        faces = face_app.get(face_image)
-        print(f"[extract_features_func] Detected {len(faces) if faces else 0} face(s).")
+        if face_image.shape[2] == 4:  
+            face_image = face_image[:, :, :3]
+        elif face_image.shape[2] == 1: 
+            face_image = np.repeat(face_image, 3, axis=2)
 
-        if not faces:
-            print("[extract_features_func] No faces found in the image.")
-            return None
-
-        embedding = faces[0].embedding.tolist()
+        embedding = face_app.models['recognition'].get(face_image).tolist()
         print(f"[extract_features_func] Extracted embedding of length {len(embedding)}.")
 
         return embedding
@@ -64,6 +62,7 @@ def extract_features_func(face_image: np.ndarray):
     except Exception as e:
         print(f"[extract_features_func] Error extracting features: {e}")
         return None
+
 
 
 
