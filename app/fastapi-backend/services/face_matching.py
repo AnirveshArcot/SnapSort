@@ -45,7 +45,7 @@ def extract_features_func(face_image):
 
 def localize_faces_func(image):
     model=get_yolo_model()
-    results = model.predict(source=image, conf=0.25,verbose=False)
+    results = model.predict(source=image, conf=0.70,verbose=False)
     face_boxes = []
     for box in results[0].boxes.xyxy:
         x1, y1, x2, y2 = map(int, box)
