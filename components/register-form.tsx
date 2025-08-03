@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { uploadImages } from "@/lib/api";
+import { registerUser } from "@/lib/api"; // Renamed import
 
 interface CameraCaptureProps {
   onCapture: (file: File) => void;
@@ -113,20 +113,14 @@ export function RegisterForm() {
 
     const formData = new FormData(e.currentTarget);
     if (imageFile) {
-      formData.set("image", imageFile); // Ensure this matches FastAPI parameter
+      formData.set("image", imageFile); // Important: must match FastAPI param
     }
 
     try {
-      const res = await uploadImages(formData);
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.detail || "Registration failed. Please try again.");
-      } else {
-        router.push("/login");
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      const response = await registerUser(formData);
+      router.push("/login");
+    } catch (err: any) {
+      setError(err.message || "Registration failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -160,7 +154,9 @@ export function RegisterForm() {
               onChange={handleFileChange}
               disabled={isLoading}
             />
-            <Button type="button" onClick={() => setShowCamera(true)} disabled={isLoading}>Use camera</Button>
+            <Button type="button" onClick={() => setShowCamera(true)} disabled={isLoading}>
+              Use camera
+            </Button>
             {imagePreview && (
               <div className="relative h-12 w-12 overflow-hidden rounded-full">
                 <img src={imagePreview} alt="Preview" className="h-full w-full object-cover" />

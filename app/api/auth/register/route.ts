@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-export async function POST(req: NextRequest) {
-  const formData = await req.formData();
-  const cookie = req.headers.get("cookie") ?? "";
+const BACKEND_URL = process.env.BACKEND_URL;
 
-  const backendRes = await fetch(`${process.env.BACKEND_URL}/register`, {
+export async function POST(request: Request) {
+  const cookie = request.headers.get("cookie") ?? "";
+  const formData = await request.formData();
+
+  const res = await fetch(`${BACKEND_URL}/register`, {
     method: "POST",
     headers: {
       cookie,
@@ -12,13 +14,21 @@ export async function POST(req: NextRequest) {
     body: formData,
   });
 
-  const data = await backendRes.json();
-  const res = NextResponse.json(data, { status: backendRes.status });
+  const payload = await res.json();
 
-  const setCookie = backendRes.headers.get("set-cookie");
-  if (setCookie) {
-    res.headers.set("set-cookie", setCookie);
+  if (!res.ok) {
+    return NextResponse.json(
+      { error: payload.detail || payload.error || "Registration failed" },
+      { status: res.status }
+    );
   }
 
-  return res;
+  const response = NextResponse.json(payload, { status: 201 });
+
+  const setCookie = res.headers.get("set-cookie");
+  if (setCookie) {
+    response.headers.set("set-cookie", setCookie);
+  }
+
+  return response;
 }
