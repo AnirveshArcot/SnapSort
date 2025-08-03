@@ -54,7 +54,7 @@ export default function AdminPage() {
   const [createdEvent, setCreatedEvent] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("event");
 
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = 1;
   const CONCURRENCY = 5;
 
   const isAdmin = user?.role === "admin";
@@ -98,21 +98,21 @@ export default function AdminPage() {
     const limit = pLimit(CONCURRENCY);
 
     try {
-      const batches = [];
-      for (let i = 0; i < selectedFiles.length; i += BATCH_SIZE) {
-        const batch = selectedFiles.slice(i, i + BATCH_SIZE);
-        const formData = new FormData();
-        batch.forEach((file) => formData.append("files", file));
-        batches.push(() =>
-          uploadImages(formData).then((res) => {
-            const completed = Math.min(i + BATCH_SIZE, selectedFiles.length);
-            setUploadProgress(Math.round((completed / selectedFiles.length) * 100));
-            return res;
-          })
-        );
-      }
-      await Promise.all(batches.map((fn) => limit(fn)));
-      toast.success("Images uploaded!");
+      let completed = 0;
+
+      const uploadTasks = selectedFiles.map((file) =>
+        limit(async () => {
+          const formData = new FormData();
+          formData.append("files", file);
+          await uploadImages(formData);
+
+          completed++;
+          setUploadProgress(Math.round((completed / selectedFiles.length) * 100));
+        })
+      );
+
+      await Promise.all(uploadTasks);
+      toast.success("All images uploaded!");
       setSelectedFiles([]);
       await fetchImages(page);
     } catch (err: any) {
@@ -123,6 +123,7 @@ export default function AdminPage() {
     setUploading(false);
     setUploadProgress(0);
   };
+
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -284,11 +285,12 @@ export default function AdminPage() {
                   {uploading && (
                     <div className="bg-gray-200 h-4 rounded-full overflow-hidden mt-1">
                       <div
-                        className="h-4 bg-blue-500"
+                        className="h-full bg-blue-600 transition-all duration-300"
                         style={{ width: `${uploadProgress}%` }}
                       />
                     </div>
                   )}
+
                 </div>
 
                 {/* Gallery */}
