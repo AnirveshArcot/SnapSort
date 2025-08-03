@@ -139,33 +139,14 @@ async def register_user(user: RegisterUser):
 
     async def process_vector():
         try:
-            total_start = time.perf_counter()
-            stage_time = total_start
-
-            print_memory_usage("Start")
-
             fullres_img = decode_base64_image(user.image)
-            print_memory_usage("After decode_base64_image")
-            stage_time = print_timing("decode_base64_image", stage_time)
-
             face_box = await asyncio.to_thread(localize_faces_func, fullres_img)
-            print(face_box)
-            print_memory_usage("After localize_faces_func")
-            stage_time = print_timing("localize_faces_func", stage_time)
 
             x, y, w, h = face_box[0]
             face_img = fullres_img[y:y+h, x:x+w]
-            print_memory_usage("After slicing face_img")
-            stage_time = print_timing("slice face_img", stage_time)
 
             vec = await asyncio.to_thread(extract_features_func, face_img)
-            print(vec)
-            print_memory_usage("After extract_features_func")
-            stage_time = print_timing("extract_features_func", stage_time)
-
             int_id = await allocate_int_id_for(str(mongo_id))
-            print_memory_usage("After allocate_int_id_for")
-            stage_time = print_timing("allocate_int_id_for", stage_time)
 
             feature_record = {
                 "_id": mongo_id,
@@ -175,40 +156,24 @@ async def register_user(user: RegisterUser):
             await feature_vector_collection.update_one(
                 {"_id": mongo_id}, {"$set": feature_record}, upsert=True
             )
-            print_memory_usage("After DB update")
-            stage_time = print_timing("DB update", stage_time)
 
             faiss_index = await get_faiss_index()
-            print_memory_usage("After get_faiss_index")
-            stage_time = print_timing("get_faiss_index", stage_time)
-
             if faiss_index is None:
                 return
 
             normed = normalize_vectors(np.array([vec]).astype("float32"))
-            print_memory_usage("After normalize_vectors")
-            stage_time = print_timing("normalize_vectors", stage_time)
-
             await asyncio.to_thread(
                 lambda: faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
             )
-            print_memory_usage("After add_with_ids")
-            stage_time = print_timing("add_with_ids", stage_time)
 
             await asyncio.to_thread(save_faiss_index, faiss_index, current_event)
-            print_memory_usage("After save_faiss_index")
-            stage_time = print_timing("save_faiss_index", stage_time)
 
-            # Optional cleanup
             del fullres_img, face_img, vec, normed
             gc.collect()
-            print_memory_usage("After cleanup")
-
-            total_time = time.perf_counter() - total_start
-            print(f"[TOTAL TIME] process_vector completed in {total_time:.3f} seconds")
 
         except Exception as e:
             print(f"[ERROR] Background feature extraction failed: {e}")
+
 
 
     asyncio.create_task(process_vector())
