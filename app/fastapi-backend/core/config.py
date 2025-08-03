@@ -26,7 +26,7 @@ FAISS_INDEX_DIR = f"{CDN_STORAGE_PATH}/faiss_indices"
 CACHE_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/image_cache"
 
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
-SIMILARITY_THRESHOLD = 0.7
+SIMILARITY_THRESHOLD = 0.4
 dimension = 4096
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
