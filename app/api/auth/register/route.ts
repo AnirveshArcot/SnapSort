@@ -6,7 +6,7 @@ export async function POST(request: Request) {
   const cookie = request.headers.get("cookie") ?? "";
   const formData = await request.formData();
 
-  const res = await fetch(`${BACKEND_URL}/register`, {
+  const res = await fetch(`${BACKEND_URL}/auth/register`, {
     method: "POST",
     headers: {
       cookie,

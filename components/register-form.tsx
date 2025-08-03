@@ -113,7 +113,7 @@ export function RegisterForm() {
 
     const formData = new FormData(e.currentTarget);
     if (imageFile) {
-      formData.set("image", imageFile); // Important: must match FastAPI param
+      formData.set("image", imageFile);
     }
 
     try {
