@@ -32,12 +32,6 @@ def get_yolo_model():
     return get_yolo_model._model
 
 
-def get_openface_model():
-    from deepface.basemodels import OpenFace
-    if not hasattr(get_openface_model, "_model"):
-        get_openface_model._model = OpenFace.loadModel()
-    return get_openface_model._model
-
 
 # ---------- Feature Extractor ----------
 
@@ -46,9 +40,9 @@ def extract_features_func(face_image: np.ndarray):
     try:
         result = DeepFace.represent(
             img_path=face_image,
-            model_name="OpenFace",
+            model_name="ArcFace",
             enforce_detection=False,
-            detector_backend="skip",
+            detector_backend="skip",  # Assumes image is already cropped or aligned
             align=True
         )
         return result[0]["embedding"]
@@ -189,7 +183,6 @@ async def run_face_matching():
                 result = await asyncio.to_thread(
                     process_image, file, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD
                 )
-                print(result)
 
                 if result:
                     for person_id, file_matches in result.items():
@@ -222,6 +215,4 @@ async def run_face_matching():
     finally:
         if hasattr(get_yolo_model, "_model"):
             del get_yolo_model._model
-        if hasattr(get_openface_model, "_model"):
-            del get_openface_model._model
         gc.collect()
