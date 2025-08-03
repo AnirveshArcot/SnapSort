@@ -36,7 +36,7 @@ def get_yolo_model():
 
 # ---------- Feature Extractor ----------
 
-def extract_feature_func(face_image: np.ndarray, model_name="VGG-Face"):
+def extract_features_func(face_image: np.ndarray, model_name="VGG-Face"):
     try:
         result = deepface.represent(
             img_path=face_image,
