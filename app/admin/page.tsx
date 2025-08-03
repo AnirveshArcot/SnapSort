@@ -73,44 +73,50 @@ export default function AdminPage() {
     }
   };
 
-  const handleUpload = async () => {
-    setUploading(true);
-    setUploadProgress(0);
-    setEstimatedTime(null);
-    const limit = pLimit(CONCURRENCY);
-    const startTime = performance.now();
+    const handleUpload = async () => {
+      if (!selectedFiles.length) return;
 
-    try {
+      setUploading(true);
+      setUploadProgress(0);
+      setEstimatedTime(null);
+
+      const limit = pLimit(CONCURRENCY);
+      const totalFiles = selectedFiles.length;
       let completed = 0;
+      const startTime = performance.now();
 
-      const uploadTasks = selectedFiles.map((file) =>
-        limit(async () => {
-          const formData = new FormData();
-          formData.append("files", file);
-          await uploadImages(formData);
-          completed++;
-          const progress = Math.round((completed / selectedFiles.length) * 100);
-          setUploadProgress(progress);
-        })
-      );
+      try {
+        const uploadTasks = selectedFiles.map((file) =>
+          limit(async () => {
+            const formData = new FormData();
+            formData.append("files", file);
+            await uploadImages(formData);
 
-      await Promise.all(uploadTasks);
-      const totalTime = (performance.now() - startTime) / 1000;
-      const avgPerFile = totalTime / selectedFiles.length;
-      const estimated = Math.ceil(avgPerFile * selectedFiles.length);
-      setEstimatedTime(estimated);
+            completed++;
+            const progress = Math.round((completed / totalFiles) * 100);
+            setUploadProgress(progress);
 
-      toast.success("All images uploaded!");
-      setSelectedFiles([]);
-      await fetchImages(page);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(`Upload failed: ${err.message}`);
-    }
+            const elapsed = (performance.now() - startTime) / 1000;
+            const remaining = ((elapsed / completed) * (totalFiles - completed)).toFixed(1);
+            setEstimatedTime(parseFloat(remaining));
+          })
+        );
 
-    setUploading(false);
-    setUploadProgress(0);
-  };
+        await Promise.all(uploadTasks);
+
+        toast.success("All images uploaded!");
+        setSelectedFiles([]);
+        await fetchImages(page);
+      } catch (err: any) {
+        console.error(err);
+        toast.error(`Upload failed: ${err.message}`);
+      } finally {
+        setUploading(false);
+        setUploadProgress(0);
+        setEstimatedTime(null);
+      }
+    };
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -258,13 +264,19 @@ export default function AdminPage() {
               <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
                 {uploading ? "Uploading…" : "Upload"}
               </Button>
-              {uploading && (
+
+              {(uploading || uploadProgress > 0) && (
                 <div className="space-y-2 mt-2">
                   <div className="bg-gray-200 h-4 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                    <div
+                      className="h-full bg-blue-600 transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
                   </div>
-                  {estimatedTime && (
-                    <p className="text-sm text-muted-foreground">Estimated time: {estimatedTime}s</p>
+                  {estimatedTime !== null && (
+                    <p className="text-sm text-muted-foreground">
+                      Estimated time left: {estimatedTime}s
+                    </p>
                   )}
                 </div>
               )}
