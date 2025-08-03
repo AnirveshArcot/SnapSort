@@ -22,12 +22,16 @@ async function fetchAPIMedia(endpoint: string, options: RequestInit = {}) {
 }
 
 export async function registerUser(userData: Record<string, any>) {
+  const formData = new FormData()
+  for (const key in userData) {
+    formData.append(key, userData[key])
+  }
   return fetchAPI('/auth/register', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(userData),
+    body: formData,
   })
 }
+
 
 
 

@@ -1,10 +1,12 @@
 import asyncio
+import base64
 import gc
 import os
 import time
+import cv2
 import bcrypt, jwt, numpy as np
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, status, Cookie
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Cookie
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 import psutil
@@ -91,43 +93,50 @@ async def get_current_user(auth_token: str | None = Cookie(None)) -> UserOut:
     )
 
 @router.post("/register", response_model=UserOut)
-async def register_user(user: RegisterUser):
+async def register_user(
+    name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    image: UploadFile = File(...)
+):
     current_settings = await settings_coll.find_one({"_id": "current_event"})
     current_status = current_settings.get("status") if current_settings else "free"
     if current_status == "processing":
         raise HTTPException(status_code=409, detail="Face matching in progress. Please try again later.")
-    existing_user = await users_collection.find_one({"email": user.email})
+
+    existing_user = await users_collection.find_one({"email": email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered.")
 
-    img = decode_base64_image(user.image)
-    if img is None:
-        raise HTTPException(status_code=400, detail="Invalid image data")
+    try:
+        image_bytes = await image.read()
+        img_np = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid image file")
 
-    box = await asyncio.to_thread(localize_faces_func, img)
-    if not box:
+    face_boxes = await asyncio.to_thread(localize_faces_func, img)
+    if not face_boxes:
         raise HTTPException(status_code=400, detail="No face detected in image.")
-    if len(box) > 1:
+    if len(face_boxes) > 1:
         raise HTTPException(status_code=400, detail="Multiple faces detected. Upload an image with only one face.")
 
-
-    import cv2, base64
+    # Compress image and encode
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]
     success, encoded_img = cv2.imencode('.jpg', img, encode_param)
     if not success:
         raise HTTPException(status_code=500, detail="Image compression failed")
     compressed_base64 = base64.b64encode(encoded_img).decode()
 
-
     hashed_password = await asyncio.to_thread(
-        lambda: bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
+        lambda: bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     )
 
     current_event = await get_current_event_id()
 
     user_data = {
-        "name": user.name,
-        "email": user.email,
+        "name": name,
+        "email": email,
         "image": compressed_base64,
         "joined_event": current_event,
         "role": "user",
@@ -139,11 +148,9 @@ async def register_user(user: RegisterUser):
 
     async def process_vector():
         try:
-            fullres_img = decode_base64_image(user.image)
-            face_box = await asyncio.to_thread(localize_faces_func, fullres_img)
-
-            x, y, w, h = face_box[0]
-            face_img = fullres_img[y:y+h, x:x+w]
+            face_box = face_boxes[0]
+            x, y, x2, y2 = face_box
+            face_img = img[y:y2, x:x2]
 
             vec = await asyncio.to_thread(extract_features_func, face_img)
             int_id = await allocate_int_id_for(str(mongo_id))
@@ -165,16 +172,13 @@ async def register_user(user: RegisterUser):
             await asyncio.to_thread(
                 lambda: faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
             )
-
             await asyncio.to_thread(save_faiss_index, faiss_index, current_event)
 
-            del fullres_img, face_img, vec, normed
+            del face_img, vec, normed
             gc.collect()
 
         except Exception as e:
             print(f"[ERROR] Background feature extraction failed: {e}")
-
-
 
     asyncio.create_task(process_vector())
     return UserOut(id=str(mongo_id), **user_data)

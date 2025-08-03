@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { registerUser } from "@/lib/api";
 
 interface CameraCaptureProps {
-  onCapture: (dataUrl: string) => void;
+  onCapture: (file: File) => void;
   onClose: () => void;
 }
 
@@ -56,8 +56,12 @@ function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(videoRef.current, 0, 0);
-    onCapture(canvas.toDataURL("image/jpeg"));
-    onClose();
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], "camera.jpg", { type: "image/jpeg" });
+      onCapture(file);
+      onClose();
+    }, "image/jpeg");
   };
 
   return (
@@ -77,16 +81,6 @@ function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   );
 }
 
-const dataUrlToFile = (dataUrl: string, filename: string): File => {
-  const [header, base64] = dataUrl.split(",");
-  const mime = /data:(.*?);/.exec(header)?.[1] || "image/jpeg";
-  const binary = atob(base64);
-  const len = binary.length;
-  const buffer = new Uint8Array(len);
-  for (let i = 0; i < len; i++) buffer[i] = binary.charCodeAt(i);
-  return new File([buffer], filename, { type: mime });
-};
-
 export function RegisterForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -97,20 +91,17 @@ export function RegisterForm() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
-    if (!file) {
-      setImageFile(null);
-      setImagePreview(null);
-      return;
-    }
     setImageFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => setImagePreview(reader.result as string);
-    reader.readAsDataURL(file);
+    if (file) {
+      setImagePreview(URL.createObjectURL(file));
+    } else {
+      setImagePreview(null);
+    }
   };
 
-  const handleCapture = async (dataUrl: string) => {
-    setImagePreview(dataUrl);
-    setImageFile(dataUrlToFile(dataUrl, "camera.jpg"));
+  const handleCapture = (file: File) => {
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -119,25 +110,17 @@ export function RegisterForm() {
     setError("");
 
     const fd = new FormData(e.currentTarget);
-    const userData: Record<string, any> = {
-      name: fd.get("name"),
-      email: fd.get("email"),
-      password: fd.get("password"),
-      image: null,
-    };
-
     if (imageFile) {
-      userData.image = await new Promise<string>(resolve => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(imageFile);
-      });
+      fd.set("image", imageFile);
     }
 
     try {
-      const res = await registerUser(userData);
-      if (res?.error) setError(res.error);
-      else router.push("/login");
+      const res = await registerUser(fd);
+      if (res?.error) {
+        setError(res.error);
+      } else {
+        router.push("/login");
+      }
     } catch (err) {
       setError("Registration failed. Please try again.");
     } finally {
@@ -148,7 +131,7 @@ export function RegisterForm() {
   return (
     <div className="grid gap-6">
       {showCamera && <CameraCapture onCapture={handleCapture} onClose={() => setShowCamera(false)} />}
-      <form onSubmit={handleSubmit} className="grid gap-4">
+      <form onSubmit={handleSubmit} className="grid gap-4" encType="multipart/form-data">
         <div className="grid gap-2">
           <Label htmlFor="name">Name</Label>
           <Input id="name" name="name" placeholder="John Doe" required disabled={isLoading} />
@@ -162,9 +145,17 @@ export function RegisterForm() {
           <Input id="password" name="password" type="password" required disabled={isLoading} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="profile-image">Profile Image</Label>
+          <Label htmlFor="image">Profile Image</Label>
           <div className="flex items-center gap-4">
-            <Input id="profile-image" name="profile-image" type="file" accept="image/*" capture="user" onChange={handleFileChange} disabled={isLoading} />
+            <Input
+              id="image"
+              name="image"
+              type="file"
+              accept="image/*"
+              capture="user"
+              onChange={handleFileChange}
+              disabled={isLoading}
+            />
             <Button type="button" onClick={() => setShowCamera(true)} disabled={isLoading}>Use camera</Button>
             {imagePreview && (
               <div className="relative h-12 w-12 overflow-hidden rounded-full">
@@ -181,7 +172,9 @@ export function RegisterForm() {
           </Label>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button type="submit" disabled={isLoading} className="w-full">{isLoading ? "Creating account…" : "Create account"}</Button>
+        <Button type="submit" disabled={isLoading} className="w-full">
+          {isLoading ? "Creating account…" : "Create account"}
+        </Button>
       </form>
     </div>
   );
