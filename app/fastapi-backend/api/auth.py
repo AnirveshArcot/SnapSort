@@ -1,4 +1,5 @@
 import asyncio
+import os
 import bcrypt, jwt, numpy as np
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status, Cookie
