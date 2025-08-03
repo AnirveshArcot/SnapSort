@@ -9,9 +9,7 @@ def load_faiss_index(event_id: str, dimension: int):
     os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
     index_path = os.path.join(FAISS_INDEX_DIR, f"{event_id}.faiss")
     print("Index path:", index_path)
-    print("Absolute path:", os.path.abspath(index_path))
     print("Exists:", os.path.exists(index_path))
-    print("Files in dir:", os.listdir(FAISS_INDEX_DIR))
     if os.path.exists(index_path):
         faiss_index = faiss.read_index(index_path)
         # Get number of vectors and dimension
