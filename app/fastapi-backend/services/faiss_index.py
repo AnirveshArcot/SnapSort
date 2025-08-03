@@ -19,17 +19,8 @@ def load_faiss_index(event_id: str, dimension: int):
         faiss_index = faiss.read_index(index_path)
         print(f"Loaded FAISS index for event {event_id}")
         print(f"Index type: {type(faiss_index)}")
-
         num_vectors = faiss_index.ntotal
         print(f"Total vectors: {num_vectors}")
-
-        # Attempt to print vectors if reconstruct() is supported
-        try:
-            for i in range(num_vectors):
-                vector = faiss_index.reconstruct(i)
-                print(f"Vector {i}: {vector}")
-        except Exception as e:
-            print(f"Could not reconstruct vectors: {e}")
 
     else:
         base = faiss.IndexFlatIP(dimension)
