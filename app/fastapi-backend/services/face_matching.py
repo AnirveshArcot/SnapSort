@@ -76,34 +76,56 @@ def localize_faces_func(image: np.ndarray):
 # ---------- Face Processing ----------
 
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
+    import numpy as np
+    import gc
+    import faiss
+
     image = None
     vecs = []
     try:
+        print("[process_image] Starting processing")
+
         image = file["image"]
         file_key = file["file_key"]
+        print(f"[process_image] file_key: {file_key}")
+        
         bounding_boxes = localize_faces_func(image)
+        print(f"[process_image] Found {len(bounding_boxes)} face(s)")
+
         if not bounding_boxes:
+            print("[process_image] No faces detected.")
             return {}
 
         valid_boxes = []
-        for x, y, w, h in bounding_boxes:
+        for idx, (x, y, w, h) in enumerate(bounding_boxes):
             face_img = image[y:y+h, x:x+w]
             feat = extract_features_func(face_img)
             if feat is not None:
                 vecs.append(np.array(feat, dtype='float32'))
-                valid_boxes.append((y,y+h, x,x+h))
+                valid_boxes.append((y, y+h, x, x+w))
+                print(f"[process_image] Face {idx} feature extracted.")
+            else:
+                print(f"[process_image] Face {idx} feature extraction failed.")
 
         if not vecs:
+            print("[process_image] No valid features extracted.")
             return {}
 
         batch = np.stack(vecs, axis=0)
+        print(f"[process_image] Stacked {len(batch)} feature vectors.")
+        
         faiss.normalize_L2(batch)
+        print("[process_image] Normalized feature vectors.")
+
         similarities, indices = faiss_index.search(batch, 1)
+        print("[process_image] Performed FAISS search.")
 
         matches = {}
         for i, box in enumerate(valid_boxes):
             score = float(similarities[i, 0])
             int_id = int(indices[i, 0])
+            print(f"[process_image] Box {i} - Similarity: {score}, Int ID: {int_id}")
+
             if score >= similarity_threshold:
                 obj_id = int_id_map.get(int_id)
                 if obj_id:
@@ -113,15 +135,26 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
                         "bounding_box": box,
                         "similarity": score
                     })
+                    print(f"[process_image] Match found: pid={pid}, score={score}")
+                else:
+                    print(f"[process_image] No object ID found for int_id={int_id}")
+            else:
+                print(f"[process_image] Similarity below threshold for box {i}")
+
+        print(f"[process_image] Total matches: {len(matches)}")
         return matches
 
-    except Exception:
+    except Exception as e:
+        print(f"[process_image] Exception occurred: {e}")
         return None
+
     finally:
         del image
         del file
         del vecs
         gc.collect()
+        print("[process_image] Cleanup complete.")
+
 
 
 # ---------- Utility ----------
