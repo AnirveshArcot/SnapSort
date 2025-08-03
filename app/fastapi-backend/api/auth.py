@@ -138,6 +138,7 @@ async def register_user(user: RegisterUser):
             print_memory_usage("After decode_base64_image")
 
             face_box = await asyncio.to_thread(localize_faces_func, fullres_img)
+            print(face_box)
             print_memory_usage("After localize_faces_func")
 
             x, y, w, h = face_box[0]
@@ -145,6 +146,7 @@ async def register_user(user: RegisterUser):
             print_memory_usage("After slicing face_img")
 
             vec = await asyncio.to_thread(extract_features_func, face_img)
+            print(vec)
             print_memory_usage("After extract_features_func")
 
             int_id = await allocate_int_id_for(str(mongo_id))
