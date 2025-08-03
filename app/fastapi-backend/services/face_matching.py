@@ -42,20 +42,18 @@ def get_openface_model():
 # ---------- Feature Extractor ----------
 
 def extract_features_func(face_image: np.ndarray):
-    from deepface.commons import functions
+    from deepface import DeepFace
     try:
-        model = get_openface_model()
-        target_size = (96, 96)
-        preprocessed_img = functions.preprocess_face(
-            img=face_image,
-            target_size=target_size,
+        result = DeepFace.represent(
+            img_path=face_image,
+            model_name="OpenFace",
             enforce_detection=False,
             detector_backend="skip",
             align=True
         )
-        embedding = model.predict(preprocessed_img)[0].tolist()
-        return embedding
-    except Exception:
+        return result[0]["embedding"]
+    except Exception as e:
+        print(f"[extract_features_func] Error: {e}")
         return None
 
 
