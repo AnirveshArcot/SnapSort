@@ -4,6 +4,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status, Cookie
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
+import psutil
 from db.models import RegisterUser, UserOut
 from core.config import (
     ALGORITHM, SECRET_KEY, users_collection, ADMIN_MAIL, ADMIN_PASSWORD,
@@ -15,6 +16,11 @@ from services.face_matching import extract_features_func, localize_faces_func
 from services.faiss_index import load_faiss_index, save_faiss_index
 
 router = APIRouter()
+
+def print_memory_usage(stage: str):
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info().rss / (1024 * 1024)  # in MB
+    print(f"[MEMORY] {stage}: {mem:.2f} MB")
 
 def normalize_vectors(vectors):
     norms = np.linalg.norm(vectors, axis=1)
@@ -125,13 +131,24 @@ async def register_user(user: RegisterUser):
 
     async def process_vector():
         try:
+            print_memory_usage("Start")
+
             fullres_img = decode_base64_image(user.image)
+            print_memory_usage("After decode_base64_image")
+
             face_box = await asyncio.to_thread(localize_faces_func, fullres_img)
+            print_memory_usage("After localize_faces_func")
+
             x, y, w, h = face_box[0]
             face_img = fullres_img[y:y+h, x:x+w]
+            print_memory_usage("After slicing face_img")
+
             vec = await asyncio.to_thread(extract_features_func, face_img)
+            print_memory_usage("After extract_features_func")
 
             int_id = await allocate_int_id_for(str(mongo_id))
+            print_memory_usage("After allocate_int_id_for")
+
             feature_record = {
                 "_id": mongo_id,
                 "feature_vector": np.array(vec).tolist(),
@@ -140,15 +157,25 @@ async def register_user(user: RegisterUser):
             await feature_vector_collection.update_one(
                 {"_id": mongo_id}, {"$set": feature_record}, upsert=True
             )
+            print_memory_usage("After DB update")
 
             faiss_index = await get_faiss_index()
+            print_memory_usage("After get_faiss_index")
+
             if faiss_index is None:
                 return
+
             normed = normalize_vectors(np.array([vec]).astype("float32"))
+            print_memory_usage("After normalize_vectors")
+
             await asyncio.to_thread(
                 lambda: faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
             )
+            print_memory_usage("After add_with_ids")
+
             await asyncio.to_thread(save_faiss_index, faiss_index, current_event)
+            print_memory_usage("After save_faiss_index")
+
         except Exception as e:
             print(f"[ERROR] Background feature extraction failed: {e}")
 

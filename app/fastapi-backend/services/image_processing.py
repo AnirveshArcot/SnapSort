@@ -19,6 +19,7 @@ def fetch_image_from_cdn(image_name: str):
         raise HTTPException(status_code=404, detail="Image not found")
     return cv2.imread(path)
 
+
 # --- MFU Cache Functions (Single Event) ---
 def get_free_space_gb(path):
     stat = os.statvfs(path)
