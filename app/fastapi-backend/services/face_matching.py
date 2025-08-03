@@ -35,12 +35,11 @@ def get_yolo_model():
 
 
 def get_feature_extractor():
-    global _model
-    if _model is None:
-        # Only loads the MobileFaceNet model for embeddings
-        _model = get_model('buffalo_l/feature_extractor', download=True)
-        _model.prepare(ctx_id=-1)  # -1 = CPU
-    return _model
+    if not hasattr(get_feature_extractor, "_model"):
+        model = get_model('buffalo_l/feature_extractor', download=True)
+        model.prepare(ctx_id=-1)
+        get_feature_extractor._model = model
+    return get_feature_extractor._model
 
 
 # ---------- Core Logic ----------
@@ -48,12 +47,11 @@ def get_feature_extractor():
 def extract_features_func(face_image: np.ndarray):
     try:
         model = get_feature_extractor()
-        # Make sure the face is aligned and resized to 112x112
         face_resized = cv2.resize(face_image, (112, 112))
         embedding = model.get(face_resized)
         return embedding.tolist()
     except Exception as e:
-        print(f"Error extracting features: {e}")
+        print(f"[extract_features_func] Error extracting features: {e}")
         return None
 
 
