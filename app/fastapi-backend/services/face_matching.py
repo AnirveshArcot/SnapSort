@@ -100,6 +100,7 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         for i, box in enumerate(valid_boxes):
             score = float(similarities[i, 0])
             int_id = int(indices[i, 0])
+            print(score)
             if score >= similarity_threshold:
                 obj_id = int_id_map.get(int_id)
                 if obj_id:
