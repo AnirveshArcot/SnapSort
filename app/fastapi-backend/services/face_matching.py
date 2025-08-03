@@ -44,14 +44,27 @@ def get_face_app():
 
 def extract_features_func(face_image: np.ndarray):
     try:
+        print("[extract_features_func] Starting feature extraction...")
+
         face_app = get_face_app()
+        print("[extract_features_func] Retrieved face_app instance.")
+
         faces = face_app.get(face_image)
+        print(f"[extract_features_func] Detected {len(faces) if faces else 0} face(s).")
+
         if not faces:
+            print("[extract_features_func] No faces found in the image.")
             return None
-        return faces[0].embedding.tolist()
+
+        embedding = faces[0].embedding.tolist()
+        print(f"[extract_features_func] Extracted embedding of length {len(embedding)}.")
+
+        return embedding
+
     except Exception as e:
-        print(f"Error extracting features: {e}")
+        print(f"[extract_features_func] Error extracting features: {e}")
         return None
+
 
 
 def localize_faces_func(image: np.ndarray):
