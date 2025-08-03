@@ -8,7 +8,6 @@ import numpy as np
 import faiss
 from tqdm import tqdm
 from fastapi import HTTPException
-import cv2
 from insightface.app import FaceAnalysis
 
 from services.image_processing import fetch_image_from_cdn
@@ -69,6 +68,8 @@ def localize_faces_func(image: np.ndarray):
 
 
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
+    image = None
+    vecs = []
     try:
         image = file["image"]
         file_key = file["file_key"]
@@ -77,7 +78,6 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         if not bounding_boxes:
             return {}
 
-        vecs = []
         valid_boxes = []
 
         for (x1, y1, x2, y2) in bounding_boxes:
@@ -98,6 +98,7 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         for i, box in enumerate(valid_boxes):
             best_score = float(similarities[i, 0])
             best_int_id = int(indices[i, 0])
+            print(best_score)
             if best_score >= similarity_threshold:
                 obj_id = int_id_map.get(best_int_id)
                 if obj_id:
@@ -111,10 +112,13 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         return matches
 
     except Exception as e:
-        print(f"Error processing image: {e}")
+        print(f"[process_image] Error: {e}")
         return None
     finally:
-        del image, file, vecs
+        # Safe deletion and memory cleanup
+        del image
+        del file
+        del vecs
         gc.collect()
 
 
@@ -218,7 +222,6 @@ async def run_face_matching():
         )
 
     finally:
-        # Cleanup models
         if hasattr(get_yolo_model, "_model"):
             del get_yolo_model._model
         if hasattr(get_face_app, "_app"):
