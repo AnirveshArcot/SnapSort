@@ -269,30 +269,32 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
+
             <div className="flex flex-wrap gap-4 mt-6">
-            <Button
-              onClick={handleCreateEvent}
-              disabled={creatingEvent}
-              variant="outline"
-            >
-              {creatingEvent ? "Creating Event..." : "Create New Event"}
-            </Button>
+              <Button
+                onClick={handleCreateEvent}
+                disabled={creatingEvent}
+                variant="outline"
+              >
+                {creatingEvent ? "Creating Event..." : "Create New Event"}
+              </Button>
 
-            <Button
-              onClick={handleMatchFaces}
-              disabled={matching}
-              variant="outline"
-            >
-              {matching ? "Matching Faces..." : "Match Faces"}
-            </Button>
+              <Button
+                onClick={handleMatchFaces}
+                disabled={matching}
+                variant="outline"
+              >
+                {matching ? "Matching Faces..." : "Match Faces"}
+              </Button>
 
-            {createdEvent && (
-              <div className="border border-green-300 p-3 rounded text-sm">
-                <div className="font-medium text-green-700">New Event Created!</div>
-                <pre className="mt-1 text-xs whitespace-pre-wrap">{JSON.stringify(createdEvent, null, 2)}</pre>
-              </div>
-            )}
-          </div>
+              {createdEvent && (
+                <div className="border border-green-300 p-3 rounded text-sm">
+                  <div className="font-medium text-green-700">New Event Created!</div>
+                  <pre className="mt-1 text-xs whitespace-pre-wrap">{JSON.stringify(createdEvent, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+
 
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">Uploaded Images</h3>
