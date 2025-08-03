@@ -8,9 +8,8 @@ import numpy as np
 import faiss
 from tqdm import tqdm
 from fastapi import HTTPException
-from insightface.app import FaceAnalysis
 import cv2
-
+from insightface.app import FaceAnalysis
 
 from services.image_processing import fetch_image_from_cdn
 from core.config import (
@@ -25,6 +24,8 @@ from core.config import (
 )
 
 
+# ---------- Models (Load-once) ----------
+
 def get_yolo_model():
     from ultralytics import YOLO
     if not hasattr(get_yolo_model, "_model"):
@@ -32,38 +33,39 @@ def get_yolo_model():
     return get_yolo_model._model
 
 
-face_app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
-face_app.prepare(ctx_id=0)
+def get_face_app():
+    if not hasattr(get_face_app, "_app"):
+        face_app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+        face_app.prepare(ctx_id=0)
+        get_face_app._app = face_app
+    return get_face_app._app
 
+
+# ---------- Core Logic ----------
 
 def extract_features_func(face_image: np.ndarray):
     try:
+        face_app = get_face_app()
         faces = face_app.get(face_image)
         if not faces:
-            print("No face detected.")
             return None
-        
         return faces[0].embedding.tolist()
     except Exception as e:
         print(f"Error extracting features: {e}")
         return None
 
 
-
-def localize_faces_func(image):
+def localize_faces_func(image: np.ndarray):
     try:
         model = get_yolo_model()
         results = model.predict(source=image, conf=0.50, verbose=False)
         face_boxes = [
             tuple(map(int, box)) for box in results[0].boxes.xyxy
         ]
-        del model
-        gc.collect()
         return face_boxes
     except Exception as e:
         print(f"Error localizing faces: {e}")
         return []
-
 
 
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
@@ -80,7 +82,7 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
 
         for (x1, y1, x2, y2) in bounding_boxes:
             face_img = image[y1:y2, x1:x2]
-            feat = extract_features_func(face_img)  
+            feat = extract_features_func(face_img)
             if feat is not None:
                 vecs.append(np.array(feat, dtype='float32'))
                 valid_boxes.append((x1, y1, x2, y2))
@@ -106,17 +108,19 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
                         "similarity": best_score
                     })
 
-        del image, file, vecs, batch, similarities, indices
-        gc.collect()
         return matches
 
     except Exception as e:
         print(f"Error processing image: {e}")
-        gc.collect()
         return None
+    finally:
+        del image, file, vecs
+        gc.collect()
 
 
-def upload_to_cdn(file_name, json_data):
+# ---------- Utility ----------
+
+def upload_to_cdn(file_name: str, json_data: dict):
     file_path = os.path.join(IMAGE_STORAGE_PATH, file_name)
     try:
         with open(file_path, "w") as f:
@@ -139,6 +143,8 @@ def list_event_files(event_id: str):
     return {"event_id": event_id, "files": files}
 
 
+# ---------- Main Matching Logic ----------
+
 async def run_face_matching():
     try:
         current_event = await get_current_event_id()
@@ -151,15 +157,11 @@ async def run_face_matching():
 
         image_files = list_event_files(current_event)
         compressed_files = [
-            file_name for file_name in image_files["files"]
-            if os.path.splitext(file_name)[0].endswith("_compressed")
+            fname for fname in image_files["files"]
+            if os.path.splitext(fname)[0].endswith("_compressed")
         ]
 
-        matches = {}
-
-        all_records_cursor = feature_vector_collection.find({"event_id": current_event})
-        all_records = await all_records_cursor.to_list(length=None)
-
+        all_records = await feature_vector_collection.find({"event_id": current_event}).to_list(length=None)
         if not all_records:
             await settings_coll.update_one(
                 {"_id": "current_event"},
@@ -168,18 +170,16 @@ async def run_face_matching():
             )
             return
 
-        map_cursor = user_id_map.find({}, {"int_id": 1, "_id": 1})
-        id_map_list = await map_cursor.to_list(length=None)
-
+        id_map_list = await user_id_map.find({}, {"int_id": 1, "_id": 1}).to_list(length=None)
         int_id_to_obj = {
-            record["int_id"]: record["_id"]
-            for record in id_map_list if "int_id" in record
+            record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record
         }
+
+        matches = {}
 
         for file_name in tqdm(compressed_files, desc="Matching Faces"):
             try:
                 image_path = f"{current_event}/{file_name}"
-
                 image = await asyncio.to_thread(fetch_image_from_cdn, image_path)
                 if image is None:
                     continue
@@ -196,15 +196,13 @@ async def run_face_matching():
                             if match['file_key'] not in matches[person_id]:
                                 matches[person_id].append(match['file_key'])
 
-                del image, file, result
-                gc.collect()
-
             except Exception:
                 traceback.print_exc()
                 continue
+            finally:
+                gc.collect()
 
-        matches_json = {"matches": matches}
-        await asyncio.to_thread(upload_to_cdn, f"{current_event}/matches.json", matches_json)
+        await asyncio.to_thread(upload_to_cdn, f"{current_event}/matches.json", {"matches": matches})
 
         await settings_coll.update_one(
             {"_id": "current_event"},
@@ -220,12 +218,9 @@ async def run_face_matching():
         )
 
     finally:
+        # Cleanup models
         if hasattr(get_yolo_model, "_model"):
             del get_yolo_model._model
-        try:
-            from deepface import DeepFace
-            if "SFace" in DeepFace.models:
-                del DeepFace.models["SFace"]
-        except Exception:
-            pass
+        if hasattr(get_face_app, "_app"):
+            del get_face_app._app
         gc.collect()
