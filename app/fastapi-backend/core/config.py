@@ -121,6 +121,7 @@ async def set_faiss_index(index):
 
 async def lifespan(app):
     print("Starting up application")
+    start_mount_thread()
 
     current_event_id = await get_current_event_id()
     if current_event_id is None:
@@ -132,7 +133,7 @@ async def lifespan(app):
         {"$set": {"status": "free"}},
         upsert=True
     )
-    start_mount_thread()
+    
     yield
     print("Cleaning up application")
     unmount_sshfs()
