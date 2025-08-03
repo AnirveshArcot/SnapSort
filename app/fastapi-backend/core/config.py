@@ -121,11 +121,12 @@ async def set_faiss_index(index):
 
 async def lifespan(app):
     print("Starting up application")
-    start_mount_thread()
+    
 
     current_event_id = await get_current_event_id()
     if current_event_id is None:
         await set_current_event_id("default_event")
+    start_mount_thread()
 
     await get_faiss_index()
     await settings_coll.update_one(
