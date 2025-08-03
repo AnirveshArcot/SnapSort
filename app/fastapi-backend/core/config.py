@@ -71,15 +71,25 @@ def unmount_sshfs():
         print(f"Failed to unmount SSHFS: {e}")
 
 
-def start_mount_thread():
-    def auto_mount_loop():
-        while True:
-            if not is_mounted(CDN_STORAGE_PATH):
-                mount_sshfs()
-            time.sleep(10)
+def auto_mount_loop():
+    while True:
+        if not is_mounted(CDN_STORAGE_PATH):
+            print("Remounting CDN storage...")
+            mount_sshfs()
+        time.sleep(10)
 
+def start_mount_thread():
     thread = threading.Thread(target=auto_mount_loop, daemon=True)
     thread.start()
+
+async def wait_for_mount(timeout=10):
+    print("Waiting for CDN mount...")
+    for _ in range(timeout):
+        if is_mounted(CDN_STORAGE_PATH):
+            print("CDN mounted successfully.")
+            return True
+        await asyncio.sleep(1)
+    raise RuntimeError("CDN mount failed after waiting.")
 
 
 async def get_current_event_id() -> str | None:
@@ -126,7 +136,9 @@ async def lifespan(app):
     current_event_id = await get_current_event_id()
     if current_event_id is None:
         await set_current_event_id("default_event")
-    start_mount_thread()
+    
+    mount_sshfs()
+    await wait_for_mount(timeout=10)
 
     await get_faiss_index()
     await settings_coll.update_one(
