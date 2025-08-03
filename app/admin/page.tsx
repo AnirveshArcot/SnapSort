@@ -53,8 +53,6 @@ export default function AdminPage() {
   const [creatingEvent, setCreatingEvent] = useState(false);
   const [createdEvent, setCreatedEvent] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("event");
-
-  const BATCH_SIZE = 1;
   const CONCURRENCY = 5;
 
   const isAdmin = user?.role === "admin";
@@ -105,9 +103,9 @@ export default function AdminPage() {
           const formData = new FormData();
           formData.append("files", file);
           await uploadImages(formData);
-
           completed++;
-          setUploadProgress(Math.round((completed / selectedFiles.length) * 100));
+          const progress = Math.round((completed / selectedFiles.length) * 100);
+          setUploadProgress(progress);
         })
       );
 
@@ -123,7 +121,6 @@ export default function AdminPage() {
     setUploading(false);
     setUploadProgress(0);
   };
-
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,7 +287,6 @@ export default function AdminPage() {
                       />
                     </div>
                   )}
-
                 </div>
 
                 {/* Gallery */}
