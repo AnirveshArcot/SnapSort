@@ -9,7 +9,8 @@ import numpy as np
 import faiss
 from tqdm import tqdm
 from fastapi import HTTPException
-from insightface.app import FaceAnalysis
+import insightface
+from insightface.model_zoo import get_model
 
 from services.image_processing import fetch_image_from_cdn
 from core.config import (
@@ -33,50 +34,27 @@ def get_yolo_model():
     return get_yolo_model._model
 
 
-def get_face_app():
-    if not hasattr(get_face_app, "_app"):
-        face_app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
-        face_app.prepare(ctx_id=0)
-        get_face_app._app = face_app
-    return get_face_app._app
+def get_feature_extractor():
+    global _model
+    if _model is None:
+        # Only loads the MobileFaceNet model for embeddings
+        _model = get_model('buffalo_l/feature_extractor', download=True)
+        _model.prepare(ctx_id=-1)  # -1 = CPU
+    return _model
 
 
 # ---------- Core Logic ----------
 
 def extract_features_func(face_image: np.ndarray):
     try:
-        print("[extract_features_func] Starting feature extraction...")
-
-        face_app = get_face_app()
-        print("[extract_features_func] Retrieved face_app instance.")
-
-        # Ensure image is in RGB format
-        if face_image.shape[2] == 4:  # RGBA
-            face_image = face_image[:, :, :3]
-        elif face_image.shape[2] == 1:  # Grayscale
-            face_image = np.repeat(face_image, 3, axis=2)
-
-        # Align the face first — if you have landmarks
-        # But since you don't (YOLO doesn't return them), we assume already aligned
-        # So resize + normalize instead
-        face_input = cv2.resize(face_image, (112, 112))  # ArcFace expects 112x112
-        face_input = cv2.cvtColor(face_input, cv2.COLOR_BGR2RGB)
-        face_input = np.transpose(face_input, (2, 0, 1))  # HWC to CHW
-        face_input = np.expand_dims(face_input, axis=0).astype(np.float32)
-        face_input = (face_input - 127.5) / 128.0  # Normalize
-
-        # Now get embedding
-        embedding = face_app.models['recognition'].get(face_input)[0].tolist()
-        print(f"[extract_features_func] Extracted embedding of length {len(embedding)}.")
-
-        return embedding
-
+        model = get_feature_extractor()
+        # Make sure the face is aligned and resized to 112x112
+        face_resized = cv2.resize(face_image, (112, 112))
+        embedding = model.get(face_resized)
+        return embedding.tolist()
     except Exception as e:
-        print(f"[extract_features_func] Error extracting features: {e}")
+        print(f"Error extracting features: {e}")
         return None
-
-
-
 
 
 def localize_faces_func(image: np.ndarray):
