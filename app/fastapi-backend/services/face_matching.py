@@ -33,15 +33,17 @@ def extract_features_func(face_image):
     from deepface import DeepFace
     try:
         result = DeepFace.represent(
-            face_image,
-            model_name="SFace",
+            img_path=face_image,
+            model_name="Facenet",
             enforce_detection=False,
-            align=True,
+            detector_backend="opencv",
+            align=True
         )
         return result[0]["embedding"]
     except Exception as e:
         print(f"Error extracting features: {e}")
         return None
+
 
 
 def localize_faces_func(image):

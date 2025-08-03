@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import os
 import time
 import bcrypt, jwt, numpy as np
