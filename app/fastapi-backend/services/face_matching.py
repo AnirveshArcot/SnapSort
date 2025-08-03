@@ -36,50 +36,26 @@ def get_yolo_model():
 
 # ---------- Feature Extractor ----------
 
-def extract_features_func(face_image: np.ndarray, model_name="VGG-Face") -> np.ndarray | None:
-    try:
-        result = DeepFace.represent(
-            img_path=face_image,
-            model_name=model_name,
-            enforce_detection=False,
-            detector_backend="skip",
-            align=True 
-        )
-        if isinstance(result, list) and result and isinstance(result[0], dict) and "embedding" in result[0]:
-            embedding = result[0]["embedding"]
-            if isinstance(embedding, list):
-                return np.array(embedding, dtype=np.float32)
-            else:
-                print(f"[extract_features_func] Invalid embedding type: {type(embedding)}")
-        else:
-            print(f"[extract_features_func] Unexpected result structure: {result}")
-    except Exception as e:
-        print(f"[extract_features_func] Error during feature extraction: {e}")
-    
-    return None
-
-
+def extract_features_func(face_image):
+    result = DeepFace.represent(face_image, model_name="VGG-Face", enforce_detection=False, align=True)
+    return result[0]["embedding"]
 
 
 # ---------- Face Localization ----------
 
-def localize_faces_func(image: np.ndarray):
-    try:
-        model = get_yolo_model()
-        results = model.predict(source=image, conf=0.50, verbose=False)
-        face_boxes = [tuple(map(int, box)) for box in results[0].boxes.xyxy]
-        return face_boxes
-    except Exception:
-        return []
+def localize_faces_func(image):
+    model=get_yolo_model()
+    results = model.predict(source=image, conf=0.25,verbose=False)
+    face_boxes = []
+    for box in results[0].boxes.xyxy:
+        x1, y1, x2, y2 = map(int, box)
+        face_boxes.append((x1, y1, x2, y2))
+    return face_boxes
 
 
 # ---------- Face Processing ----------
 
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
-    import numpy as np
-    import gc
-    import faiss
-
     image = None
     vecs = []
     try:
@@ -97,12 +73,12 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
             return {}
 
         valid_boxes = []
-        for idx, (x, y, w, h) in enumerate(bounding_boxes):
-            face_img = image[y:y+h, x:x+w]
+        for idx, (x1, y1, x2, y2) in enumerate(bounding_boxes):
+            face_img = image[y1:y2, x1:x2]
             feat = extract_features_func(face_img)
             if feat is not None:
                 vecs.append(np.array(feat, dtype='float32'))
-                valid_boxes.append((y, y+h, x, x+w))
+                valid_boxes.append((y1, y2, x1, x2))
                 print(f"[process_image] Face {idx} feature extracted.")
             else:
                 print(f"[process_image] Face {idx} feature extraction failed.")
