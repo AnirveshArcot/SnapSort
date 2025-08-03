@@ -1,12 +1,12 @@
 # services/face_matching.py
 import asyncio
 import gc
-import traceback
 import os
 import json
 import cv2
 import numpy as np
 import faiss
+import traceback
 from tqdm import tqdm
 from fastapi import HTTPException
 
@@ -22,15 +22,12 @@ from core.config import (
     get_faiss_index,
 )
 
-
-# ---------- Models (Load-once) ----------
-
+# ---------- Model Loading (Singleton) ----------
 def get_yolo_model():
     from ultralytics import YOLO
     if not hasattr(get_yolo_model, "_model"):
         get_yolo_model._model = YOLO("./yolov8n_face_trained.pt")
     return get_yolo_model._model
-
 
 def get_openface_model():
     from deepface.basemodels import OpenFace
@@ -38,42 +35,38 @@ def get_openface_model():
         get_openface_model._model = OpenFace.loadModel()
     return get_openface_model._model
 
-
-# ---------- Feature Extractor ----------
-
+# ---------- Feature Extraction ----------
 def extract_features_func(face_image: np.ndarray):
-    from deepface import DeepFace
+    from deepface.commons import functions
     try:
-        result = DeepFace.represent(
-            img_path=face_image,
-            model_name="OpenFace",
+        model = get_openface_model()
+        target_size = (96, 96)
+        preprocessed_img = functions.preprocess_face(
+            img=face_image,
+            target_size=target_size,
             enforce_detection=False,
             detector_backend="skip",
             align=True
         )
-        return result[0]["embedding"]
+        embedding = model.predict(preprocessed_img)[0].tolist()
+        return embedding
     except Exception as e:
         print(f"[extract_features_func] Error: {e}")
         return None
 
-
-# ---------- Face Localization ----------
-
+# ---------- Face Detection ----------
 def localize_faces_func(image: np.ndarray):
     try:
         model = get_yolo_model()
         results = model.predict(source=image, conf=0.50, verbose=False)
         face_boxes = [tuple(map(int, box)) for box in results[0].boxes.xyxy]
         return face_boxes
-    except Exception:
+    except Exception as e:
+        print(f"[localize_faces_func] Error: {e}")
         return []
 
-
-# ---------- Face Processing ----------
-
+# ---------- Image Processing ----------
 def process_image(file, int_id_map, faiss_index, similarity_threshold):
-    image = None
-    vecs = []
     try:
         image = file["image"]
         file_key = file["file_key"]
@@ -81,7 +74,9 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         if not bounding_boxes:
             return {}
 
+        vecs = []
         valid_boxes = []
+
         for x1, y1, x2, y2 in bounding_boxes:
             face_img = image[y1:y2, x1:x2]
             feat = extract_features_func(face_img)
@@ -100,7 +95,6 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
         for i, box in enumerate(valid_boxes):
             score = float(similarities[i, 0])
             int_id = int(indices[i, 0])
-            print(score)
             if score >= similarity_threshold:
                 obj_id = int_id_map.get(int_id)
                 if obj_id:
@@ -112,17 +106,14 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
                     })
         return matches
 
-    except Exception:
+    except Exception as e:
+        print(f"[process_image] Error: {e}")
         return None
     finally:
-        del image
         del file
-        del vecs
         gc.collect()
 
-
-# ---------- Utility ----------
-
+# ---------- File Utilities ----------
 def upload_to_cdn(file_name: str, json_data: dict):
     file_path = os.path.join(IMAGE_STORAGE_PATH, file_name)
     try:
@@ -132,10 +123,9 @@ def upload_to_cdn(file_name: str, json_data: dict):
         raise HTTPException(status_code=400, detail=f"Failed to save JSON file: {str(e)}")
     return {"url": f"local://{file_path}"}
 
-
 def list_event_files(event_id: str):
     event_folder = os.path.join(IMAGE_STORAGE_PATH, event_id)
-    if not os.path.exists(event_folder) or not os.path.isdir(event_folder):
+    if not os.path.isdir(event_folder):
         raise HTTPException(status_code=400, detail=f"Event folder not found: {event_id}")
     files = [
         fname for fname in os.listdir(event_folder)
@@ -144,9 +134,7 @@ def list_event_files(event_id: str):
     ]
     return {"event_id": event_id, "files": files}
 
-
-# ---------- Main Matching Logic ----------
-
+# ---------- Main Matching Routine ----------
 async def run_face_matching():
     try:
         current_event = await get_current_event_id()
@@ -155,7 +143,7 @@ async def run_face_matching():
 
         faiss_index = await get_faiss_index()
         if faiss_index is None:
-            raise ValueError("FAISS index not loaded for current event")
+            raise ValueError("FAISS index not loaded")
 
         image_files = list_event_files(current_event)
         compressed_files = [
@@ -173,9 +161,7 @@ async def run_face_matching():
             return
 
         id_map_list = await user_id_map.find({}, {"int_id": 1, "_id": 1}).to_list(length=None)
-        int_id_to_obj = {
-            record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record
-        }
+        int_id_to_obj = {record["int_id"]: record["_id"] for record in id_map_list if "int_id" in record}
 
         matches = {}
 
@@ -190,7 +176,6 @@ async def run_face_matching():
                 result = await asyncio.to_thread(
                     process_image, file, int_id_to_obj, faiss_index, SIMILARITY_THRESHOLD
                 )
-                print(result)
 
                 if result:
                     for person_id, file_matches in result.items():
@@ -216,10 +201,8 @@ async def run_face_matching():
     except Exception as e:
         await settings_coll.update_one(
             {"_id": "current_event"},
-            {"$set": {"status": "error", "error_detail": str(e)}},
-            upsert=True
+            {"$set": {"status": "error", "error_detail": str(e)}}
         )
-
     finally:
         if hasattr(get_yolo_model, "_model"):
             del get_yolo_model._model
