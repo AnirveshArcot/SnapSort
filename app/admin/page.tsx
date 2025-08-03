@@ -165,7 +165,7 @@ const handleCreateEvent = async () => {
     try {
       const res = await createNewEvent();
       setCreatedEvent(res);
-      toast.success(res.message || "Event created");
+      toast.success("Event created");
     } catch (err: any) {
       toast.error(err.message || "Failed to create event");
     }
