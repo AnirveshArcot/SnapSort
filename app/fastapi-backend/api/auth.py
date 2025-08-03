@@ -112,7 +112,7 @@ async def register_user(
         image_bytes = await image.read()
         img_np = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid image file")
 
     face_boxes = await asyncio.to_thread(localize_faces_func, img)
@@ -151,6 +151,9 @@ async def register_user(
             x, y, w, h = face_boxes[0]
             face_img = img[y:y + h, x:x + w]
             vec = await asyncio.to_thread(extract_features_func, face_img)
+            if vec is None:
+                raise ValueError("Feature vector extraction failed")
+
             int_id = await allocate_int_id_for(str(mongo_id))
 
             feature_record = {
@@ -164,13 +167,16 @@ async def register_user(
 
             faiss_index = await get_faiss_index()
             if faiss_index is None:
+                print("[WARN] FAISS index not loaded for current event")
                 return
 
             normed = normalize_vectors(np.array([vec]).astype("float32"))
             await asyncio.to_thread(
                 lambda: faiss_index.add_with_ids(normed, np.array([int_id], dtype="int64"))
             )
-            await asyncio.to_thread(save_faiss_index, faiss_index, current_event)
+
+            # ✅ This ensures memory + disk update in sync
+            await set_faiss_index(faiss_index)
 
             del face_img, vec, normed
             gc.collect()
@@ -179,6 +185,7 @@ async def register_user(
             print(f"[ERROR] Background feature extraction failed: {e}")
 
     asyncio.create_task(process_vector())
+
     return UserOut(id=str(mongo_id), **user_data)
 
 
