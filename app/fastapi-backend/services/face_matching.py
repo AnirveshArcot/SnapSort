@@ -71,55 +71,81 @@ def process_image(file, int_id_map, faiss_index, similarity_threshold):
     image = None
     vecs = []
     try:
+        print("[process_image] Starting image processing...")
+
         image = file["image"]
         file_key = file["file_key"]
+        print(f"[process_image] Processing file_key: {file_key}")
 
         bounding_boxes = localize_faces_func(image)
+        print(f"[process_image] Found {len(bounding_boxes)} bounding boxes: {bounding_boxes}")
+
         if not bounding_boxes:
+            print("[process_image] No faces detected. Returning empty result.")
             return {}
 
         valid_boxes = []
 
-        for (x1, y1, x2, y2) in bounding_boxes:
+        for idx, (x1, y1, x2, y2) in enumerate(bounding_boxes):
             face_img = image[y1:y2, x1:x2]
+            print(f"[process_image] Extracting features from face {idx+1} at box ({x1}, {y1}, {x2}, {y2})")
             feat = extract_features_func(face_img)
             if feat is not None:
-                vecs.append(np.array(feat, dtype='float32'))
+                vec = np.array(feat, dtype='float32')
+                vecs.append(vec)
                 valid_boxes.append((x1, y1, x2, y2))
+                print(f"[process_image] Feature vector extracted for face {idx+1}")
+            else:
+                print(f"[process_image] Feature extraction failed for face {idx+1}")
 
         if not vecs:
+            print("[process_image] No valid feature vectors extracted. Returning empty result.")
             return {}
 
+        print(f"[process_image] Stacking {len(vecs)} feature vectors into batch")
         batch = np.stack(vecs, axis=0)
+        print("[process_image] Normalizing batch vectors using faiss.normalize_L2")
         faiss.normalize_L2(batch)
+
+        print("[process_image] Searching FAISS index")
         similarities, indices = faiss_index.search(batch, 1)
+        print(f"[process_image] Similarities: {similarities}")
+        print(f"[process_image] Indices: {indices}")
 
         matches = {}
         for i, box in enumerate(valid_boxes):
             best_score = float(similarities[i, 0])
             best_int_id = int(indices[i, 0])
-            print(best_score)
+            print(f"[process_image] Face {i+1}: best_score = {best_score}, best_int_id = {best_int_id}")
             if best_score >= similarity_threshold:
                 obj_id = int_id_map.get(best_int_id)
                 if obj_id:
                     pid = str(obj_id)
+                    print(f"[process_image] Match found: {pid} with score {best_score}")
                     matches.setdefault(pid, []).append({
                         "file_key": file_key,
                         "bounding_box": box,
                         "similarity": best_score
                     })
+                else:
+                    print(f"[process_image] No obj_id found for int_id {best_int_id}")
+            else:
+                print(f"[process_image] Similarity below threshold ({similarity_threshold})")
 
+        print(f"[process_image] Total matches found: {len(matches)}")
         return matches
 
     except Exception as e:
         print(f"[process_image] Error: {e}")
         return None
     finally:
-        # Safe deletion and memory cleanup
+        print("[process_image] Cleaning up memory...")
         del image
         del file
         del vecs
         gc.collect()
+        print("[process_image] Cleanup complete.")
+
 
 
 # ---------- Utility ----------
