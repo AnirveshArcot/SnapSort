@@ -37,7 +37,6 @@ export default function AdminPage() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
 
   const [imageList, setImageList] = useState<{ name: string; base64: string }[]>([]);
   const [page, setPage] = useState(0);
@@ -54,6 +53,8 @@ export default function AdminPage() {
   const [creatingEvent, setCreatingEvent] = useState(false);
   const [createdEvent, setCreatedEvent] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("event");
+
+  const BATCH_SIZE = 3;
   const CONCURRENCY = 2;
 
   const isAdmin = user?.role === "admin";
@@ -64,6 +65,7 @@ export default function AdminPage() {
     try {
       const res = await getImages(targetPage * 20, 20);
       const images = Array.isArray(res) ? res : res.images || [];
+
       setImageList(images);
       setPage(targetPage);
       const count = res.total_count || 0;
@@ -73,85 +75,60 @@ export default function AdminPage() {
     }
   };
 
-    const handleUpload = async () => {
-      if (!selectedFiles.length) return;
+  const handleDownload = async (filename: string) => {
+    try {
+      const blob = await downloadImageBlob(filename);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename.replace("_preview", "");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed:", err);
+      alert("Failed to download image.");
+    }
+  };
 
-      setUploading(true);
-      setUploadProgress(0);
-      setEstimatedTime(null);
+  const handleUpload = async () => {
+    setUploading(true);
+    setUploadProgress(0);
+    const limit = pLimit(CONCURRENCY);
 
-      const limit = pLimit(CONCURRENCY);
-      const totalFiles = selectedFiles.length;
-      let completed = 0;
-      const startTime = performance.now();
+    let completedBatches = 0;
+    const totalBatches = Math.ceil(selectedFiles.length / BATCH_SIZE);
 
-      try {
-        const uploadTasks = selectedFiles.map((file) =>
-          limit(async () => {
-            const formData = new FormData();
-            formData.append("files", file);
-            await uploadImages(formData);
+    try {
+      const batches = [];
+      for (let i = 0; i < selectedFiles.length; i += BATCH_SIZE) {
+        const batch = selectedFiles.slice(i, i + BATCH_SIZE);
+        const formData = new FormData();
+        batch.forEach((file) => formData.append("files", file));
 
-            completed++;
-            const progress = Math.round((completed / totalFiles) * 100);
-            setUploadProgress(progress);
-
-            const elapsed = (performance.now() - startTime) / 1000;
-            const remaining = ((elapsed / completed) * (totalFiles - completed)).toFixed(1);
-            setEstimatedTime(parseFloat(remaining));
+        batches.push(() =>
+          uploadImages(formData).finally(() => {
+            completedBatches += 1;
+            setUploadProgress(Math.round((completedBatches / totalBatches) * 100));
           })
         );
-
-        await Promise.all(uploadTasks);
-
-        toast.success("All images uploaded!");
-        setSelectedFiles([]);
-        await fetchImages(page);
-      } catch (err: any) {
-        console.error(err);
-        toast.error(`Upload failed: ${err.message}`);
-      } finally {
-        setUploading(false);
-        setUploadProgress(0);
-        setEstimatedTime(null);
       }
-    };
 
+      await Promise.all(batches.map((fn) => limit(fn)));
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setSelectedFiles(Array.from(e.target.files));
+      toast.success("Images uploaded!");
+      setSelectedFiles([]);
+      await fetchImages(page);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Upload failed: ${err.message}`);
     }
+
+    setUploading(false);
+    setUploadProgress(0);
   };
 
-  useEffect(() => {
-    (async () => {
-      const sessionUser = await getSession();
-      if (sessionUser) {
-        if (!["admin", "photographer", "editor"].includes(sessionUser.role)) {
-          router.push("/");
-          return;
-        }
-        setUser(sessionUser);
-        setChecking(false);
-        if (sessionUser.role === "admin") await fetchUserList();
-        if (["admin", "editor"].includes(sessionUser.role)) await fetchImages(0);
-      } else {
-        router.push("/login");
-      }
-    })();
-  }, [router]);
-
-  const fetchUserList = async () => {
-    setLoadingUsers(true);
-    try {
-      const res = await getAllUsersForAdmin();
-      setUserList(res.users || []);
-    } catch {
-      setUserList([]);
-    }
-    setLoadingUsers(false);
-  };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,7 +155,7 @@ export default function AdminPage() {
     }
   };
 
-  const handleCreateEvent = async () => {
+const handleCreateEvent = async () => {
     if (!confirm("Are you sure you want to create a new event?")) return;
     if (!confirm("⚠️ Creating a new event may affect existing data. Continue?")) return;
     if (!confirm("⚠️ This may take several minutes. Proceed?")) return;
@@ -206,22 +183,40 @@ export default function AdminPage() {
     setMatching(false);
   };
 
-  const handleDownload = async (filename: string) => {
+  const fetchUserList = async () => {
+    setLoadingUsers(true);
     try {
-      const blob = await downloadImageBlob(filename);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename.replace("_preview", "");
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Download failed:", err);
-      alert("Failed to download image.");
+      const res = await getAllUsersForAdmin();
+      setUserList(res.users || []);
+    } catch {
+      setUserList([]);
+    }
+    setLoadingUsers(false);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setSelectedFiles(Array.from(e.target.files));
     }
   };
+
+  useEffect(() => {
+    (async () => {
+      const sessionUser = await getSession();
+      if (sessionUser) {
+        if (!["admin", "photographer", "editor"].includes(sessionUser.role)) {
+          router.push("/");
+          return;
+        }
+        setUser(sessionUser);
+        setChecking(false);
+        if (sessionUser.role === "admin") await fetchUserList();
+        if (["admin", "editor"].includes(sessionUser.role)) await fetchImages(0);
+      } else {
+        router.push("/login");
+      }
+    })();
+  }, [router]);
 
   if (checking) {
     return (
@@ -233,11 +228,16 @@ export default function AdminPage() {
 
   return (
     <div>
+      {/* Header */}
       <header className="border-b">
         <div className="flex h-16 items-center justify-between px-3 sm:px-10">
-          <Link href="/" className="text-xl font-bold">SnapSort</Link>
+          <Link href="/" className="flex items-center">
+            <span className="text-xl font-bold">SnapSort</span>
+          </Link>
           <nav className="flex items-center">
-            {user ? <UserNav user={user} /> : (
+            {user ? (
+              <UserNav user={user} />
+            ) : (
               <div className="flex gap-2">
                 <Link href="/login"><Button variant="ghost">Login</Button></Link>
                 <Link href="/register"><Button>Register</Button></Link>
@@ -256,108 +256,107 @@ export default function AdminPage() {
             {isAdmin && <TabsTrigger value="users">User Management</TabsTrigger>}
           </TabsList>
 
-          {/* Event Management Tab */}
+          {/* Event Management */}
           <TabsContent value="event">
-            <div className="space-y-2 mb-6">
-              <label className="font-medium">Upload Images</label>
-              <input type="file" multiple accept="image/*" onChange={handleFileChange} />
-              <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
-                {uploading ? "Uploading…" : "Upload"}
-              </Button>
-
-              {(uploading || uploadProgress > 0) && (
-                <div className="space-y-2 mt-2">
-                  <div className="bg-gray-200 h-4 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-blue-600 transition-all duration-300"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                  {estimatedTime !== null && (
-                    <p className="text-sm text-muted-foreground">
-                      Estimated time left: {estimatedTime}s
-                    </p>
+            {(isAdmin || isPhotographer || isEditor) && (
+              <>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {isAdmin && (
+                    <Button onClick={handleCreateEvent} disabled={creatingEvent}>
+                      {creatingEvent ? "Creating…" : "Create New Event"}
+                    </Button>
+                  )}
+                  {isAdmin && (
+                    <Button onClick={handleMatchFaces} disabled={matching}>
+                      {matching ? "Matching…" : "Match Faces"}
+                    </Button>
                   )}
                 </div>
-              )}
-            </div>
+                {createdEvent && (
+                  <div className="border border-green-300 rounded p-3 mb-4">
+                    <div className="font-medium">Event Created!</div>
+                    <div>Code: <span className="font-mono">{createdEvent.code}</span></div>
+                    <div>ID: <span className="font-mono">{createdEvent.id}</span></div>
+                  </div>
+                )}
 
-            <div className="flex flex-wrap gap-4 mt-6">
-              <Button
-                onClick={handleCreateEvent}
-                disabled={creatingEvent}
-                variant="outline"
-              >
-                {creatingEvent ? "Creating Event..." : "Create New Event"}
-              </Button>
-
-              <Button
-                onClick={handleMatchFaces}
-                disabled={matching}
-                variant="outline"
-              >
-                {matching ? "Matching Faces..." : "Match Faces"}
-              </Button>
-
-              {createdEvent && (
-                <div className="border border-green-300 p-3 rounded text-sm">
-                  <div className="font-medium text-green-700">New Event Created!</div>
-                  <pre className="mt-1 text-xs whitespace-pre-wrap">{JSON.stringify(createdEvent, null, 2)}</pre>
+                {/* Upload */}
+                <div className="space-y-2 mb-6">
+                  <label className="font-medium">Upload Images</label>
+                  <input type="file" multiple accept="image/*" onChange={handleFileChange} />
+                  <Button onClick={handleUpload} disabled={!selectedFiles.length || uploading}>
+                    {uploading ? "Uploading…" : "Upload"}
+                  </Button>
+                  {uploading && (
+                    <div className="bg-gray-200 h-4 rounded-full overflow-hidden mt-1">
+                      <div
+                        className="h-4 bg-blue-500"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
 
+                {/* Gallery */}
+                <div className="space-y-2">
+                  <h3 className="text-lg font-semibold">Uploaded Images</h3>
+                  {imageList.length ? (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                        {imageList.map((img) => (
+                          <div key={img.name} className="border rounded-lg shadow">
+                            <img src={img.base64} alt={img.name} className="w-full h-48 object-cover" />
+                            <div className="p-2 flex justify-between items-center text-sm">
+                              <span className="truncate" title={img.name}>{img.name}</span>
+                              <Button size="sm" onClick={() => handleDownload(img.name)}>Download</Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:gap-4 items-center justify-between">
+                        <div className="flex gap-2">
+                          <Button onClick={() => fetchImages(page - 1)} disabled={page === 0}>
+                            Previous
+                          </Button>
+                          <Button onClick={() => fetchImages(page + 1)} disabled={page + 1 >= totalPages}>
+                            Next
+                          </Button>
+                        </div>
 
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold">Uploaded Images</h3>
-              {imageList.length ? (
-                <>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                    {imageList.map((img) => (
-                      <div key={img.name} className="border rounded-lg shadow">
-                        <img src={img.base64} alt={img.name} className="w-full h-48 object-cover" />
-                        <div className="p-2 flex justify-between items-center text-sm">
-                          <span className="truncate" title={img.name}>{img.name}</span>
-                          <Button size="sm" onClick={() => handleDownload(img.name)}>Download</Button>
+                        <div className="flex items-center gap-2">
+                          <span>
+                            Page <strong>{page + 1}</strong> of <strong>{totalPages}</strong>
+                          </span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={totalPages}
+                            defaultValue={page + 1}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const target = e.target as HTMLInputElement;
+                                const pageNumber = parseInt(target.value);
+                                if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= totalPages) {
+                                  fetchImages(pageNumber - 1);
+                                }
+                              }
+                            }}
+                            className="w-16 px-2 py-1 border rounded text-center"
+                          />
+                          <span className="text-sm text-muted-foreground">Press Enter to jump</span>
                         </div>
                       </div>
-                    ))}
-                  </div>
 
-                  <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:gap-4 items-center justify-between">
-                    <div className="flex gap-2">
-                      <Button onClick={() => fetchImages(page - 1)} disabled={page === 0}>Previous</Button>
-                      <Button onClick={() => fetchImages(page + 1)} disabled={page + 1 >= totalPages}>Next</Button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span>Page <strong>{page + 1}</strong> of <strong>{totalPages}</strong></span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={totalPages}
-                        defaultValue={page + 1}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            const target = e.target as HTMLInputElement;
-                            const pageNumber = parseInt(target.value);
-                            if (!isNaN(pageNumber) && pageNumber >= 1 && pageNumber <= totalPages) {
-                              fetchImages(pageNumber - 1);
-                            }
-                          }
-                        }}
-                        className="w-16 px-2 py-1 border rounded text-center"
-                      />
-                      <span className="text-sm text-muted-foreground">Press Enter to jump</span>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
-              )}
-            </div>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">No images uploaded yet.</p>
+                  )}
+                </div>
+              </>
+            )}
           </TabsContent>
 
-          {/* User Management Tab */}
+          {/* User Management */}
           {isAdmin && (
             <TabsContent value="users">
               <div className="border rounded-lg p-4 mb-6">
@@ -379,7 +378,6 @@ export default function AdminPage() {
                   </div>
                 )}
               </div>
-
               <div className="border rounded-lg p-4">
                 <h3 className="text-lg font-semibold mb-2">All Users</h3>
                 {loadingUsers ? (
