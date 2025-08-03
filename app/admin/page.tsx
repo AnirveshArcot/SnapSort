@@ -54,8 +54,8 @@ export default function AdminPage() {
   const [createdEvent, setCreatedEvent] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("event");
 
-  const BATCH_SIZE = 3;
-  const CONCURRENCY = 2;
+  const BATCH_SIZE = 5;
+  const CONCURRENCY = 5;
 
   const isAdmin = user?.role === "admin";
   const isPhotographer = user?.role === "photographer";
