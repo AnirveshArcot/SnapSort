@@ -37,8 +37,17 @@ def get_yolo_model():
 # ---------- Feature Extractor ----------
 
 def extract_features_func(face_image):
-    result = DeepFace.represent(face_image, model_name="VGG-Face", enforce_detection=False, align=True)
-    return result[0]["embedding"]
+    try:
+        result = DeepFace.represent(
+            img_path=face_image,        
+            model_name="ArcFace",
+            enforce_detection=False,  
+            align=True                 
+        )
+        return result[0]["embedding"]
+    except Exception as e:
+        print(f"[extract_features_func] Error: {e}")
+        return None
 
 
 # ---------- Face Localization ----------
