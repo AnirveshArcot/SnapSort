@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { registerUser } from "@/lib/api"; // Renamed import
+import { registerUser } from "@/lib/api";
 
 interface CameraCaptureProps {
   onCapture: (file: File) => void;
@@ -111,13 +111,17 @@ export function RegisterForm() {
     setIsLoading(true);
     setError("");
 
-    const formData = new FormData(e.currentTarget);
-    if (imageFile) {
-      formData.set("image", imageFile);
+    if (!imageFile) {
+      setError("Profile image is required.");
+      setIsLoading(false);
+      return;
     }
 
+    const formData = new FormData(e.currentTarget);
+    formData.set("image", imageFile);
+
     try {
-      const response = await registerUser(formData);
+      await registerUser(formData);
       router.push("/login");
     } catch (err: any) {
       setError(err.message || "Registration failed. Please try again.");
@@ -131,19 +135,27 @@ export function RegisterForm() {
       {showCamera && <CameraCapture onCapture={handleCapture} onClose={() => setShowCamera(false)} />}
       <form onSubmit={handleSubmit} className="grid gap-4" encType="multipart/form-data">
         <div className="grid gap-2">
-          <Label htmlFor="name">Name</Label>
+          <Label htmlFor="name">
+            Name <span className="text-red-500">*</span>
+          </Label>
           <Input id="name" name="name" placeholder="John Doe" required disabled={isLoading} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">
+            Email <span className="text-red-500">*</span>
+          </Label>
           <Input id="email" name="email" type="email" placeholder="name@example.com" required disabled={isLoading} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="password">Password</Label>
+          <Label htmlFor="password">
+            Password <span className="text-red-500">*</span>
+          </Label>
           <Input id="password" name="password" type="password" required disabled={isLoading} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="image">Profile Image</Label>
+          <Label htmlFor="image">
+            Profile Image <span className="text-red-500">*</span>
+          </Label>
           <div className="flex items-center gap-4">
             <Input
               id="image"
@@ -163,7 +175,9 @@ export function RegisterForm() {
               </div>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">For best results, take your photo under proper lighting.</p>
+          <p className="text-xs text-muted-foreground">
+            📸 Please upload a <strong>clear picture</strong> taken in <strong>good lighting</strong>.
+          </p>
         </div>
         <div className="flex items-start gap-2">
           <input id="terms" name="terms" type="checkbox" required className="mt-1 h-4 w-4" />
@@ -174,6 +188,12 @@ export function RegisterForm() {
             </a>
           </Label>
         </div>
+
+        <p className="text-sm text-yellow-700 bg-yellow-100 p-2 rounded border border-yellow-300">
+          ⚠️ <strong>Note:</strong> Once you register, your profile image and details <strong>cannot be changed</strong>.
+          Please double-check all information and ensure your photo is clear.
+        </p>
+
         {error && <p className="text-sm text-destructive">{error}</p>}
         <Button type="submit" disabled={isLoading} className="w-full">
           {isLoading ? "Creating account…" : "Create account"}
