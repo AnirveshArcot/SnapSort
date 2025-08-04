@@ -13,12 +13,10 @@ export default function CDNGuard({ children }: { children: React.ReactNode }) {
       try {
         const data = await checkCDNMounted();
 
-        // Only redirect if the CDN is not mounted
         if (!data.mounted && pathname !== "/cdn-unavailable") {
           router.replace("/cdn-unavailable");
         }
 
-        // Optional: if CDN is mounted and user is on /cdn-unavailable, send back to home
         if (data.mounted && pathname === "/cdn-unavailable") {
           router.replace("/");
         }
