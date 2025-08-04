@@ -126,7 +126,9 @@ async def register_user(
     success, encoded_img = cv2.imencode('.jpg', img, encode_param)
     if not success:
         raise HTTPException(status_code=500, detail="Image compression failed")
-    compressed_base64 = base64.b64encode(encoded_img).decode()
+    compressed_base64 = (
+    "data:image/jpeg;base64," + base64.b64encode(encoded_img).decode()
+    )
 
     hashed_password = await asyncio.to_thread(
         lambda: bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
