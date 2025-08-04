@@ -27,7 +27,7 @@ CACHE_DIR = "/home/ubuntu/SnapSort/app/fastapi-backend/image_cache"
 
 ALLOWED_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 SIMILARITY_THRESHOLD = 0.5
-dimension = 4096
+dimension = 512
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
