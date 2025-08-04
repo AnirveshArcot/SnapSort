@@ -14,6 +14,9 @@ export default function CDNGuard({ children }: { children: React.ReactNode }) {
         if (!data.mounted) {
           router.replace("/cdn-unavailable");
         }
+        if(data.mounted){
+          router.replace("/")
+        }
       } catch (err) {
         console.error("CDN check failed:", err);
         router.replace("/cdn-unavailable");
